@@ -67,7 +67,7 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
             Ok(request) => {
                 // Add headers
                 let mut request =
-                    request.headers(&[("User-Agent", "ESP32-C6/1.0"), ("Accept", "*/*")]);
+                    request.headers(&[("User-Agent", "ESP32-S3/1.0"), ("Accept", "*/*")]);
 
                 rprintln!("Sending HTTPS request...");
 

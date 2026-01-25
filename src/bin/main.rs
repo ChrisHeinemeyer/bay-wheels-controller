@@ -34,7 +34,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 async fn main(spawner: Spawner) -> ! {
     // Initialize RTT for logging
     rtt_target::rtt_init_print!();
-    rprintln!("Starting ESP32-C6...");
+    rprintln!("Starting ESP32-S3...");
 
     // Initialize ESP-HAL with max CPU clock
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -45,9 +45,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // Initialize Embassy executor
     let timg0 = TimerGroup::new(peripherals.TIMG1);
-    let sw_interrupt =
-        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
+    esp_rtos::start(timg0.timer0);
     rprintln!("Embassy initialized!");
 
     // Initialize WiFi radio
@@ -80,7 +78,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // Setup LED on GPIO15
     let led_pin = gpio::Output::new(
-        peripherals.GPIO15,
+        peripherals.GPIO4,
         gpio::Level::Low,
         gpio::OutputConfig::default(),
     );

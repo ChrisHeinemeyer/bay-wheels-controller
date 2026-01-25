@@ -63,8 +63,12 @@ fn linker_be_nice() {
         std::process::exit(0);
     }
 
-    println!(
-        "cargo:rustc-link-arg=--error-handling-script={}",
-        std::env::current_exe().unwrap().display()
-    );
+    // Only add error-handling-script for RISC-V targets (xtensa-esp-elf-gcc doesn't support it)
+    let target = std::env::var("TARGET").unwrap_or_default();
+    if target.starts_with("riscv") {
+        println!(
+            "cargo:rustc-link-arg=--error-handling-script={}",
+            std::env::current_exe().unwrap().display()
+        );
+    }
 }
