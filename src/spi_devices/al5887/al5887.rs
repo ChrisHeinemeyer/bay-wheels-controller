@@ -5,6 +5,7 @@ use esp_hal::{
     spi::master::{Config, Spi},
     time::Rate,
 };
+use strum::IntoEnumIterator;
 
 use crate::spi_devices::al5887::enums::{Color, ColorChannel};
 use crate::spi_devices::al5887::{enums::Led, registers::Register};
@@ -99,12 +100,18 @@ impl<'d> Al5887<'d> {
         Ok(())
     }
 
+    pub async fn set_chip_enable(&mut self, enable: bool) -> Result<(), Al5887Error> {
+        self.write_register(SpiFrame::set_chip_enable(enable))
+            .await?;
+        Ok(())
+    }
+
     pub async fn init_driver(&mut self) -> Result<(), Al5887Error> {
         self.led_en.set_high();
         self.led_rst_n.set_low();
         Timer::after(Duration::from_millis(1)).await;
         self.led_rst_n.set_high();
-        self.write_register(SpiFrame::set_chip_enable(true)).await?;
+        self.set_chip_enable(true).await?;
         let led_0_brightness_color =
             SpiFrame::set_led_brightness_color(Led::Led0, 127, Color::new(255, 255, 255));
         self.write_register(led_0_brightness_color[0]).await?;
@@ -130,14 +137,21 @@ impl<'d> Al5887<'d> {
         Ok(())
     }
 
-    pub async fn set_vec_led_brightness_color(
+    pub async fn set_all_leds_brightness_color(
         &mut self,
-        leds: Vec<Led>,
         brightness: u8,
         color: Color,
     ) -> Result<(), Al5887Error> {
-        for led in leds {
+        for led in Led::iter() {
             self.set_led_brightness_color(led, brightness, color)
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn set_vec_led(&mut self, data: Vec<(Led, Color)>) -> Result<(), Al5887Error> {
+        for data_item in data.iter() {
+            self.set_led_brightness_color(data_item.0, 30, data_item.1)
                 .await?;
         }
         Ok(())

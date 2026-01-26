@@ -1,15 +1,25 @@
 use heapless::String;
 use picojson::PullParser;
 
+use crate::tasks::signals::StationIdx;
+
 /// Station data we care about
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StationData {
-    pub station_id: String<64>,
-    pub station_name: String<64>,
+    pub station_idx: StationIdx,
     pub num_bikes_available: u32,
     pub num_ebikes_available: u32,
 }
 
+impl Default for StationData {
+    fn default() -> Self {
+        Self {
+            station_idx: StationIdx::None,
+            num_bikes_available: 0,
+            num_ebikes_available: 0,
+        }
+    }
+}
 #[derive(Debug, PartialEq)]
 enum ParserPhase {
     SearchingForStations, // Looking for "stations": [
@@ -19,7 +29,7 @@ enum ParserPhase {
 
 /// Truly incremental streaming parser that processes ONE station at a time
 pub struct StreamingStationParser {
-    target_stations: &'static [(&'static str, &'static str)], // (station_id, name) pairs
+    target_stations: &'static [(&'static str, &'static str, StationIdx)], // (station_id, name, station_id) pairs
     // Small buffer for incomplete data at chunk boundaries
     remainder: String<8192>, // Can hold one complete station object
     phase: ParserPhase,
@@ -29,7 +39,7 @@ pub struct StreamingStationParser {
 }
 
 impl StreamingStationParser {
-    pub fn new(target_stations: &'static [(&'static str, &'static str)]) -> Self {
+    pub fn new(target_stations: &'static [(&'static str, &'static str, StationIdx)]) -> Self {
         Self {
             target_stations,
             remainder: String::new(),
@@ -220,14 +230,11 @@ impl StreamingStationParser {
             let target_match = self
                 .target_stations
                 .iter()
-                .find(|&&(target_id, _)| target_id == id.as_str());
+                .find(|&&(target_id, _, _)| target_id == id.as_str());
 
-            if let Some(&(_, name)) = target_match {
-                let mut station_name = String::new();
-                let _ = station_name.push_str(name);
+            if let Some(&(_, _, station_idx)) = target_match {
                 return Some(StationData {
-                    station_id: id.clone(),
-                    station_name,
+                    station_idx: station_idx,
                     num_bikes_available: num_bikes_available.unwrap_or(0)
                         - num_ebikes_available.unwrap_or(0),
                     num_ebikes_available: num_ebikes_available.unwrap_or(0),

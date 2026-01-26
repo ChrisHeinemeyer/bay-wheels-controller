@@ -1,4 +1,5 @@
 use int_enum::IntEnum;
+use strum::{EnumIter, IntoEnumIterator};
 
 #[repr(u8)]
 #[derive(Copy, Clone, IntEnum)]
@@ -9,7 +10,7 @@ pub enum ColorChannel {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, IntEnum)]
+#[derive(Copy, Clone, IntEnum, EnumIter)]
 pub enum Led {
     Led0 = 0,
     Led1 = 1,

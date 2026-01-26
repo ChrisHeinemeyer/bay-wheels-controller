@@ -12,26 +12,17 @@ use reqwless::{
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
+use crate::{
+    stations::TARGET_STATIONS,
+    tasks::{
+        signals::{STATION_DATA_SIGNAL, StationIdx},
+        station_parser::StationData,
+    },
+};
+
 // Start with a simple API that has a tiny response (~200 bytes)
 // const URL: &str = "https://api.open-notify.org/astros.json";
 const URL: &str = "https://gbfs.lyft.com/gbfs/2.3/bay/en/station_status.json";
-
-// Station IDs we care about with human-readable names
-static TARGET_STATIONS: &[(&str, &str)] = &[
-    (
-        "bfb90ed7-6039-4c61-9b13-fb60b1786dde",
-        "McAllister St at Arguello Blvd",
-    ),
-    (
-        "f0083331-9bf8-407f-bba2-ab00c8968db9",
-        "Arguello Blvd at Edward ",
-    ),
-    (
-        "4d2b40cb-88e2-4371-8532-b1e52e797c8c",
-        "Harrison St at 17th St",
-    ), // Add more station IDs and names here
-];
-
 #[embassy_executor::task]
 pub async fn fetch_task(stack: &'static Stack<'static>) {
     // Wait for network to be ready
@@ -92,7 +83,7 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
 
                 // Small buffer just for HTTP headers/request metadata
                 let mut headers_buf = [0u8; 1024];
-
+                let mut station_data: [StationData; 16] = [StationData::default(); 16];
                 match request.send(&mut headers_buf).await {
                     Ok(response) => {
                         let status = response.status;
@@ -116,6 +107,7 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
                                 Ok(0) => {
                                     rprintln!("✓ Stream complete! Total: {} bytes", total_bytes);
                                     parser.finish();
+                                    STATION_DATA_SIGNAL.signal(station_data);
                                     break;
                                 }
                                 Ok(n) => {
@@ -127,10 +119,10 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
 
                                         // Print any stations found in this chunk
                                         for station in stations.iter() {
+                                            station_data[station.station_idx as usize] = *station;
                                             rprintln!(
-                                                "  → {} ({}): {} bikes, {} ebikes",
-                                                station.station_name,
-                                                station.station_id,
+                                                "{}: {} bikes, {} ebikes",
+                                                station.station_idx,
                                                 station.num_bikes_available,
                                                 station.num_ebikes_available
                                             );
