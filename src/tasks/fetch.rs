@@ -15,7 +15,7 @@ use static_cell::StaticCell;
 use crate::{
     stations::TARGET_STATIONS,
     tasks::{
-        signals::{STATION_DATA_SIGNAL, StationIdx},
+        signals::STATION_DATA_SIGNAL,
         station_parser::StationData,
     },
 };

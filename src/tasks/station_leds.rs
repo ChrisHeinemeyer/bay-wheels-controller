@@ -67,10 +67,16 @@ fn get_leds(station_idx: StationIdx, station_data: [StationData; 16]) -> Vec<(Le
     let mut leds = Vec::new();
     for station in station_data.iter() {
         if station.station_idx == station_idx {
-            for led in 0..min(station.num_ebikes_available, MECHANICAL_BIKE_LEDS.len() as u32) {
+            for led in 0..min(
+                station.num_ebikes_available,
+                MECHANICAL_BIKE_LEDS.len() as u32,
+            ) {
                 leds.push((EBIKE_LEDS[led as usize], EBIKE_COLOR));
             }
-            for led in 0..min(station.num_bikes_available, MECHANICAL_BIKE_LEDS.len() as u32) {
+            for led in 0..min(
+                station.num_bikes_available,
+                MECHANICAL_BIKE_LEDS.len() as u32,
+            ) {
                 leds.push((MECHANICAL_BIKE_LEDS[led as usize], MECHANICAL_BIKE_COLOR));
             }
         }

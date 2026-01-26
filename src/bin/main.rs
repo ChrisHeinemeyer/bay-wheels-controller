@@ -86,7 +86,7 @@ async fn main(spawner: Spawner) -> ! {
             .unwrap();
     let mut mcpwm = esp_hal::mcpwm::McPwm::new(peripherals.MCPWM0, clock_cfg);
     mcpwm.operator0.set_timer(&mcpwm.timer0);
-    let mut pwm_pin = mcpwm.operator0.with_pin_a(
+    let pwm_pin = mcpwm.operator0.with_pin_a(
         led_pin,
         esp_hal::mcpwm::operator::PwmPinConfig::UP_ACTIVE_HIGH,
     );

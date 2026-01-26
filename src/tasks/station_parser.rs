@@ -29,7 +29,7 @@ enum ParserPhase {
 
 /// Truly incremental streaming parser that processes ONE station at a time
 pub struct StreamingStationParser {
-    target_stations: &'static [(&'static str, &'static str, StationIdx)], // (station_id, name, station_id) pairs
+    target_stations: &'static [(&'static str, StationIdx)], // (station_id, station_id) pairs
     // Small buffer for incomplete data at chunk boundaries
     remainder: String<8192>, // Can hold one complete station object
     phase: ParserPhase,
@@ -39,7 +39,7 @@ pub struct StreamingStationParser {
 }
 
 impl StreamingStationParser {
-    pub fn new(target_stations: &'static [(&'static str, &'static str, StationIdx)]) -> Self {
+    pub fn new(target_stations: &'static [(&'static str, StationIdx)]) -> Self {
         Self {
             target_stations,
             remainder: String::new(),
@@ -230,9 +230,9 @@ impl StreamingStationParser {
             let target_match = self
                 .target_stations
                 .iter()
-                .find(|&&(target_id, _, _)| target_id == id.as_str());
+                .find(|&&(target_id, _)| target_id == id.as_str());
 
-            if let Some(&(_, _, station_idx)) = target_match {
+            if let Some(&(_, station_idx)) = target_match {
                 return Some(StationData {
                     station_idx: station_idx,
                     num_bikes_available: num_bikes_available.unwrap_or(0)

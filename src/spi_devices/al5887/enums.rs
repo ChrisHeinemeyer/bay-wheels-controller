@@ -1,5 +1,5 @@
 use int_enum::IntEnum;
-use strum::{EnumIter, IntoEnumIterator};
+use strum::EnumIter;
 
 #[repr(u8)]
 #[derive(Copy, Clone, IntEnum)]
