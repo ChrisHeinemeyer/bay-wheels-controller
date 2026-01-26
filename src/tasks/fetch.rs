@@ -16,11 +16,20 @@ use static_cell::StaticCell;
 // const URL: &str = "https://api.open-notify.org/astros.json";
 const URL: &str = "https://gbfs.lyft.com/gbfs/2.3/bay/en/station_status.json";
 
-// Station IDs we care about
-static TARGET_STATIONS: &[&str] = &[
-    "bfb90ed7-6039-4c61-9b13-fb60b1786dde",
-    "f0083331-9bf8-407f-bba2-ab00c8968db9",
-    // Add more station IDs here
+// Station IDs we care about with human-readable names
+static TARGET_STATIONS: &[(&str, &str)] = &[
+    (
+        "bfb90ed7-6039-4c61-9b13-fb60b1786dde",
+        "McAllister St at Arguello Blvd",
+    ),
+    (
+        "f0083331-9bf8-407f-bba2-ab00c8968db9",
+        "Arguello Blvd at Edward ",
+    ),
+    (
+        "4d2b40cb-88e2-4371-8532-b1e52e797c8c",
+        "Harrison St at 17th St",
+    ), // Add more station IDs and names here
 ];
 
 #[embassy_executor::task]
@@ -33,19 +42,29 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
         rprintln!("Network is up! IP: {}", config.address);
     }
 
+    rprintln!("DEBUG: Starting to initialize TCP client state...");
+
     // Create static buffers for TCP client state and TLS
     // TLS needs large buffers for handshake AND streaming - increase for large responses
-    static TCP_CLIENT_STATE: StaticCell<TcpClientState<2, 32768, 32768>> = StaticCell::new();
+    static TCP_CLIENT_STATE: StaticCell<TcpClientState<1, 32768, 32768>> = StaticCell::new();
     static TLS_RX_BUFFER: StaticCell<[u8; 32768]> = StaticCell::new();
     static TLS_TX_BUFFER: StaticCell<[u8; 32768]> = StaticCell::new();
 
+    rprintln!("DEBUG: Initializing TCP state...");
     let tcp_state = TCP_CLIENT_STATE.init(TcpClientState::new());
     let tls_read_buffer = TLS_RX_BUFFER.init([0; 32768]);
     let tls_write_buffer = TLS_TX_BUFFER.init([0; 32768]);
 
     // Create TCP client and DNS socket
+    rprintln!("DEBUG: Creating TCP client...");
     let tcp_client = TcpClient::new(*stack, tcp_state);
+    rprintln!("DEBUG: TCP client created");
+
+    rprintln!("DEBUG: Creating DNS socket...");
     let dns_socket = DnsSocket::new(*stack);
+    rprintln!("DEBUG: DNS socket created");
+
+    rprintln!("DEBUG: Entering main loop...");
 
     loop {
         rprintln!("");
@@ -82,13 +101,10 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
                         // Get a reader to stream the body
                         let mut body_reader = response.body().reader();
 
-                        rprintln!("✓ Streaming and parsing response...");
-                        rprintln!("  Looking for stations: {:?}", TARGET_STATIONS);
-
                         // Create streaming parser - processes chunks as they arrive
                         let mut parser = StreamingStationParser::new(TARGET_STATIONS);
 
-                        let mut chunk_buf = [0u8; 4096]; // 4KB chunks
+                        let mut chunk_buf = [0u8; 1024]; // 1KB chunks
                         let mut total_bytes = 0;
                         let mut stations_found = 0;
 
@@ -112,7 +128,8 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
                                         // Print any stations found in this chunk
                                         for station in stations.iter() {
                                             rprintln!(
-                                                "  → {}: {} bikes, {} ebikes",
+                                                "  → {} ({}): {} bikes, {} ebikes",
+                                                station.station_name,
                                                 station.station_id,
                                                 station.num_bikes_available,
                                                 station.num_ebikes_available

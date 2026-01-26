@@ -1,11 +1,11 @@
 use heapless::String;
 use picojson::PullParser;
-use rtt_target::rprintln;
 
 /// Station data we care about
 #[derive(Debug, Clone)]
 pub struct StationData {
     pub station_id: String<64>,
+    pub station_name: String<64>,
     pub num_bikes_available: u32,
     pub num_ebikes_available: u32,
 }
@@ -19,7 +19,7 @@ enum ParserPhase {
 
 /// Truly incremental streaming parser that processes ONE station at a time
 pub struct StreamingStationParser {
-    target_stations: &'static [&'static str],
+    target_stations: &'static [(&'static str, &'static str)], // (station_id, name) pairs
     // Small buffer for incomplete data at chunk boundaries
     remainder: String<8192>, // Can hold one complete station object
     phase: ParserPhase,
@@ -29,7 +29,7 @@ pub struct StreamingStationParser {
 }
 
 impl StreamingStationParser {
-    pub fn new(target_stations: &'static [&'static str]) -> Self {
+    pub fn new(target_stations: &'static [(&'static str, &'static str)]) -> Self {
         Self {
             target_stations,
             remainder: String::new(),
@@ -216,17 +216,18 @@ impl StreamingStationParser {
         }
         // Check if this is a target station
         if let Some(ref id) = station_id {
-            let is_target = self
+            // Look up the station in our map
+            let target_match = self
                 .target_stations
                 .iter()
-                .any(|&target| target == id.as_str());
-            if is_target {
-                rprintln!("  Parsed station: {}", json);
-            }
-            if is_target {
-                rprintln!("✓ Found target: {}", id);
+                .find(|&&(target_id, _)| target_id == id.as_str());
+
+            if let Some(&(_, name)) = target_match {
+                let mut station_name = String::new();
+                let _ = station_name.push_str(name);
                 return Some(StationData {
                     station_id: id.clone(),
+                    station_name,
                     num_bikes_available: num_bikes_available.unwrap_or(0)
                         - num_ebikes_available.unwrap_or(0),
                     num_ebikes_available: num_ebikes_available.unwrap_or(0),
