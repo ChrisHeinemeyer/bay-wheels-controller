@@ -1055,6 +1055,7 @@ dependencies = [
  "esp-rtos",
  "heapless 0.8.0",
  "ieee80211",
+ "int-enum",
  "picojson",
  "reqwless",
  "rtt-target",
@@ -1405,6 +1406,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "int-enum"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e366a1634cccc76b4cfd3e7580de9b605e4d93f1edac48d786c1f867c0def495"
+dependencies = [
+ "proc-macro2",
+ "proc-macro2-diagnostics",
+ "quote",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1744,6 +1757,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "535d180e0ecab6268a3e718bb9fd44db66bbbc256257165fc699dadf70d16fe7"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proc-macro2-diagnostics"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+ "version_check",
 ]
 
 [[package]]

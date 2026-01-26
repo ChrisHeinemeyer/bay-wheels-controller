@@ -15,7 +15,7 @@ use embassy_time::{Duration, Timer};
 use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup};
 use rtt_target::rprintln;
 
-use esp32_embasssy_wifi_test::tasks::{blink, fetch, input_read, wifi_connect};
+use esp32_embasssy_wifi_test::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
 use esp32_embasssy_wifi_test::{network, spi_devices, wifi};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -115,11 +115,44 @@ async fn main(spawner: Spawner) -> ! {
         gpio::Input::new(peripherals.GPIO36, gpio::InputConfig::default()),
     );
 
+    let al5887 = spi_devices::al5887::al5887::Al5887::new(
+        peripherals.SPI3,
+        gpio::Output::new(
+            peripherals.GPIO10,
+            gpio::Level::Low,
+            gpio::OutputConfig::default(),
+        ),
+        gpio::Output::new(
+            peripherals.GPIO12,
+            gpio::Level::Low,
+            gpio::OutputConfig::default(),
+        ),
+        gpio::Input::new(peripherals.GPIO13, gpio::InputConfig::default()),
+        gpio::Output::new(
+            peripherals.GPIO11,
+            gpio::Level::Low,
+            gpio::OutputConfig::default(),
+        ),
+        gpio::Output::new(
+            peripherals.GPIO8,
+            gpio::Level::Low,
+            gpio::OutputConfig::default(),
+        ),
+        gpio::Output::new(
+            peripherals.GPIO9,
+            gpio::Level::High,
+            gpio::OutputConfig::default(),
+        ),
+    );
+
     // Spawn tasks
     rprintln!("Spawning tasks...");
     spawner
         .spawn(blink::blink_task(pwm_pin))
         .expect("Failed to spawn blink_task");
+    spawner
+        .spawn(station_leds::station_leds_task(al5887))
+        .expect("Failed to spawn station_leds_task");
     spawner
         .spawn(fetch::fetch_task(stack))
         .expect("Failed to spawn fetch_task");
