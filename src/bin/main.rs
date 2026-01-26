@@ -15,8 +15,8 @@ use embassy_time::{Duration, Timer};
 use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup};
 use rtt_target::rprintln;
 
-use esp32_embasssy_wifi_test::tasks::{blink, fetch, wifi_connect};
-use esp32_embasssy_wifi_test::{network, wifi};
+use esp32_embasssy_wifi_test::tasks::{blink, fetch, input_read, wifi_connect};
+use esp32_embasssy_wifi_test::{network, spi_devices, wifi};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -74,7 +74,6 @@ async fn main(spawner: Spawner) -> ! {
 
     // Setup WiFi sniffer
     wifi::setup_sniffer(interfaces.sniffer);
-    rprintln!("WiFi sniffer configured!");
 
     // Setup LED on GPIO15
     let led_pin = gpio::Output::new(
@@ -101,6 +100,20 @@ async fn main(spawner: Spawner) -> ! {
         .unwrap();
     mcpwm.timer0.start(timer_clock_cfg);
 
+    let shift_register = spi_devices::shift_register::ShiftRegister::new(
+        peripherals.SPI2,
+        gpio::Output::new(
+            peripherals.GPIO33,
+            gpio::Level::Low,
+            gpio::OutputConfig::default(),
+        ),
+        gpio::Output::new(
+            peripherals.GPIO35,
+            gpio::Level::Low,
+            gpio::OutputConfig::default(),
+        ),
+        gpio::Input::new(peripherals.GPIO36, gpio::InputConfig::default()),
+    );
 
     // Spawn tasks
     rprintln!("Spawning tasks...");
@@ -110,6 +123,9 @@ async fn main(spawner: Spawner) -> ! {
     spawner
         .spawn(fetch::fetch_task(stack))
         .expect("Failed to spawn fetch_task");
+    spawner
+        .spawn(input_read::input_read_task(shift_register))
+        .expect("Failed to spawn input_read_task");
     rprintln!("All tasks spawned!");
 
     // Main loop - keep alive
