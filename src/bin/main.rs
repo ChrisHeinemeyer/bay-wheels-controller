@@ -82,11 +82,30 @@ async fn main(spawner: Spawner) -> ! {
         gpio::Level::Low,
         gpio::OutputConfig::default(),
     );
+    let clock_cfg =
+        esp_hal::mcpwm::PeripheralClockConfig::with_frequency(esp_hal::time::Rate::from_mhz(40))
+            .unwrap();
+    let mut mcpwm = esp_hal::mcpwm::McPwm::new(peripherals.MCPWM0, clock_cfg);
+    mcpwm.operator0.set_timer(&mcpwm.timer0);
+    let mut pwm_pin = mcpwm.operator0.with_pin_a(
+        led_pin,
+        esp_hal::mcpwm::operator::PwmPinConfig::UP_ACTIVE_HIGH,
+    );
+
+    let timer_clock_cfg = clock_cfg
+        .timer_clock_with_frequency(
+            99,
+            esp_hal::mcpwm::timer::PwmWorkingMode::Increase,
+            esp_hal::time::Rate::from_khz(20),
+        )
+        .unwrap();
+    mcpwm.timer0.start(timer_clock_cfg);
+
 
     // Spawn tasks
     rprintln!("Spawning tasks...");
     spawner
-        .spawn(blink::blink_task(led_pin))
+        .spawn(blink::blink_task(pwm_pin))
         .expect("Failed to spawn blink_task");
     spawner
         .spawn(fetch::fetch_task(stack))
