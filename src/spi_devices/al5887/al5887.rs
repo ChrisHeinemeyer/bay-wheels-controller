@@ -1,15 +1,17 @@
-use heapless::Vec;
 use embassy_time::{Duration, Timer};
 use esp_hal::{
     Blocking, gpio, peripherals,
     spi::master::{Config, Spi},
     time::Rate,
 };
+use heapless::Vec;
 use strum::IntoEnumIterator;
 
-
-use crate::{spi_devices::al5887::enums::{Color, ColorChannel}, tasks::station_leds::MAX_LEDS};
 use crate::spi_devices::al5887::{enums::Led, registers::Register};
+use crate::{
+    spi_devices::al5887::enums::{Color, ColorChannel},
+    tasks::station_leds::MAX_LEDS,
+};
 #[derive(Copy, Clone)]
 pub struct SpiFrame {
     register: Register,
@@ -150,7 +152,10 @@ impl<'d> Al5887<'d> {
         Ok(())
     }
 
-    pub async fn set_vec_led(&mut self, data: Vec<(Led, Color), MAX_LEDS>) -> Result<(), Al5887Error> {
+    pub async fn set_vec_led(
+        &mut self,
+        data: Vec<(Led, Color), MAX_LEDS>,
+    ) -> Result<(), Al5887Error> {
         for data_item in data.iter() {
             self.set_led_brightness_color(data_item.0, 30, data_item.1)
                 .await?;

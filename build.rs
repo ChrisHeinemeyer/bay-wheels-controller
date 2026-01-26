@@ -2,11 +2,11 @@ fn main() {
     linker_be_nice();
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
-    
+
     // Load .env file and export variables as cargo environment variables
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let env_file = std::path::Path::new(&manifest_dir).join(".env");
-    
+
     if env_file.exists() {
         // Read .env file manually and set environment variables
         if let Ok(contents) = std::fs::read_to_string(&env_file) {

@@ -14,10 +14,7 @@ use static_cell::StaticCell;
 
 use crate::{
     stations::TARGET_STATIONS,
-    tasks::{
-        signals::STATION_DATA_SIGNAL,
-        station_parser::StationData,
-    },
+    tasks::{signals::STATION_DATA_SIGNAL, station_parser::StationData},
 };
 
 // Start with a simple API that has a tiny response (~200 bytes)

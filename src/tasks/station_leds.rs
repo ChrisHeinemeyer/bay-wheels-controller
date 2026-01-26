@@ -7,8 +7,8 @@ use crate::tasks::signals::STATION_DATA_SIGNAL;
 use crate::tasks::signals::STATION_SIGNAL;
 use crate::tasks::signals::StationIdx;
 use crate::tasks::station_parser::StationData;
-use heapless::Vec;
 use embassy_time::{Duration, Timer};
+use heapless::Vec;
 use rtt_target::rprintln;
 
 #[embassy_executor::task]
@@ -65,7 +65,10 @@ const MECHANICAL_BIKE_LEDS: [Led; 6] = [
 
 pub const MAX_LEDS: usize = 12;
 
-fn get_leds(station_idx: StationIdx, station_data: [StationData; 16]) -> Vec<(Led, Color), MAX_LEDS> {
+fn get_leds(
+    station_idx: StationIdx,
+    station_data: [StationData; 16],
+) -> Vec<(Led, Color), MAX_LEDS> {
     let mut leds = Vec::new();
     for station in station_data.iter() {
         if station.station_idx == station_idx {
