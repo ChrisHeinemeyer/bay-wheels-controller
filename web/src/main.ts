@@ -35,6 +35,36 @@ function setStep(step: Step) {
   document.getElementById(`panel-${step}`)?.classList.add("active");
 }
 
+async function ensurePortReady(port: SerialPort): Promise<void> {
+  try {
+    await port.close();
+  } catch {
+    // Port may not be open, ignore
+  }
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+function patchPortWithRetry(port: SerialPort): void {
+  const originalOpen = port.open.bind(port);
+  port.open = async (options?: SerialOptions) => {
+    const opts: SerialOptions = options ?? { baudRate: 115200 };
+    try {
+      await originalOpen(opts);
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message?.toLowerCase().includes("already open")
+      ) {
+        await port.close();
+        await new Promise((r) => setTimeout(r, 500));
+        await originalOpen(opts);
+      } else {
+        throw err;
+      }
+    }
+  };
+}
+
 function checkWebSerial() {
   if (!("serial" in navigator)) {
     alert(
@@ -81,6 +111,8 @@ async function runFlash() {
     const port = await navigator.serial.requestPort();
     log(logEl, "Connecting to device...");
 
+    await ensurePortReady(port);
+    patchPortWithRetry(port);
     const transport = new Transport(port);
     await transport.connect(115200);
 
@@ -153,6 +185,8 @@ async function runProvision() {
     const port = await navigator.serial.requestPort();
     log(logEl, "Connecting to device...");
 
+    await ensurePortReady(port);
+    patchPortWithRetry(port);
     await port.open({ baudRate: 115200 });
 
     const encoder = new TextEncoder();
