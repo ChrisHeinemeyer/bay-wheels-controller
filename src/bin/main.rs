@@ -17,8 +17,8 @@ use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup, usb_serial_jtag::U
 use esp_storage::FlashStorage;
 use rtt_target::rprintln;
 
-use esp32_embasssy_wifi_test::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
-use esp32_embasssy_wifi_test::{network, provisioning, spi_devices, wifi, wifi_config};
+use bay_wheels_controller::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
+use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();

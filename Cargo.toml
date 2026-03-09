@@ -1,11 +1,11 @@
 [package]
 edition      = "2024"
-name         = "esp32-embasssy-wifi-test"
+name         = "bay-wheels-controller"
 rust-version = "1.88"
 version      = "0.1.0"
 
 [[bin]]
-name = "esp32-embasssy-wifi-test"
+name = "bay-wheels-controller"
 path = "./src/bin/main.rs"
 
 [dependencies]
@@ -68,6 +68,7 @@ strum = { version = "0.27.2", default-features = false }
 strum_macros = "0.27.2"
 esp-storage = { version = "0.8", features = ["esp32s3"] }
 esp-nvs = { version = "0.1", features = ["esp32s3"] }
+espflash = "4.3.0"
 
 
 [profile.dev]

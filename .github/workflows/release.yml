@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust for Xtensa (ESP32-S3)
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          default: true
+          version: '1.88.0.0'
+          buildtargets: esp32s3
+
+      - name: Install cargo-espflash
+        run: cargo install cargo-espflash --locked
+
+      - name: Build and create firmware image
+        run: |
+          cargo espflash save-image \
+            --chip esp32s3 \
+            --release \
+            --merge \
+            firmware-bay-wheels-controller.bin
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: firmware-bay-wheels-controller.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
