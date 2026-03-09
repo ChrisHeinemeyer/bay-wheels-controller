@@ -23,6 +23,14 @@ Pre-built firmware is available on [Releases](https://github.com/ChrisHeinemeyer
    espflash flash firmware-bay-wheels-controller.bin --chip esp32s3
    ```
 
+## Git hooks
+
+Pre-commit runs `cargo fmt`; pre-push runs `cargo run`. Install once:
+
+```bash
+./scripts/setup-hooks.sh
+```
+
 ## Building from source
 
 Requires the [esp-rs](https://github.com/esp-rs) toolchain. See [The Rust on ESP Book](https://docs.esp-rs.org/book/) for setup.

@@ -68,7 +68,6 @@ strum = { version = "0.27.2", default-features = false }
 strum_macros = "0.27.2"
 esp-storage = { version = "0.8", features = ["esp32s3"] }
 esp-nvs = { version = "0.1", features = ["esp32s3"] }
-espflash = "4.3.0"
 
 
 [profile.dev]
