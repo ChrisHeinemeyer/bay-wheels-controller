@@ -4,6 +4,7 @@
 # will have compiled files and executables
 debug/
 target/
+.bin
 
 # Editor configuration
 .vscode/

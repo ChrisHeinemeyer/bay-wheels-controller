@@ -34,19 +34,14 @@ fn is_provisioning_button_pressed(button: &gpio::Input<'_>) -> bool {
     button.is_low()
 }
 
-/// Get WiFi credentials from NVS
-/// Returns None if no credentials are stored - user must run provisioning first
+/// Get WiFi credentials from NVS, returning None if none are stored.
 fn get_wifi_credentials(flash: FlashStorage<'static>) -> Option<(String, String)> {
     match wifi_config::load_credentials(flash) {
         Ok(creds) => {
             rprintln!("Using WiFi credentials from NVS");
             Some((creds.ssid, creds.password))
         }
-        Err(_) => {
-            rprintln!("No WiFi credentials found in NVS");
-            rprintln!("Hold GPIO2 button during boot to enter provisioning mode");
-            None
-        }
+        Err(_) => None,
     }
 }
 
@@ -73,20 +68,38 @@ async fn main(spawner: Spawner) -> ! {
         gpio::InputConfig::default().with_pull(gpio::Pull::Up),
     );
 
-    if is_provisioning_button_pressed(&provision_button) {
-        rprintln!("Provisioning button pressed - entering WiFi setup mode");
+    let button_pressed = is_provisioning_button_pressed(&provision_button);
+    drop(provision_button);
 
-        // Initialize USB-Serial-JTAG for provisioning
+    // Enter provisioning if GPIO2 was held at boot.
+    if button_pressed {
+        rprintln!("Provisioning button pressed - entering WiFi setup mode");
         let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE);
         let flash = FlashStorage::new(peripherals.FLASH);
-
-        // Run provisioning (this will reboot when done)
         provisioning::run_provisioning(usb_serial, flash);
-        // Never returns - reboots after provisioning
+        // Never returns
     }
 
-    // Drop the button input so GPIO2 can be used elsewhere if needed
-    drop(provision_button);
+    // Check credentials before initializing Embassy/WiFi so FLASH is still free.
+    let creds = {
+        let flash = FlashStorage::new(peripherals.FLASH);
+        get_wifi_credentials(flash) // flash dropped after this block
+    };
+
+    let (ssid, password) = match creds {
+        Some(c) => c,
+        None => {
+            // No credentials stored yet - enter provisioning automatically.
+            rprintln!("No WiFi credentials found - entering setup mode automatically");
+            let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE);
+            // SAFETY: The FlashStorage created above has been dropped.
+            // Flash operations use ROM functions and hold no exclusive hardware resources,
+            // so stealing the peripheral for a fresh FlashStorage is safe here.
+            let flash = FlashStorage::new(unsafe { esp_hal::peripherals::FLASH::steal() });
+            provisioning::run_provisioning(usb_serial, flash);
+            // Never returns
+        }
+    };
 
     // Initialize Embassy executor
     let timg0 = TimerGroup::new(peripherals.TIMG1);
@@ -99,20 +112,6 @@ async fn main(spawner: Spawner) -> ! {
     let (controller, interfaces) =
         esp_radio::wifi::new(radio_init, peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
-
-    // Get WiFi credentials from NVS
-    let flash = FlashStorage::new(peripherals.FLASH);
-    let creds = get_wifi_credentials(flash);
-
-    // If no credentials, panic with instructions (can't re-enter provisioning here
-    // since we've already consumed FLASH - user must reboot with button held)
-    let (ssid, password) = creds.unwrap_or_else(|| {
-        rprintln!("===========================================");
-        rprintln!("No WiFi credentials configured!");
-        rprintln!("Reboot while holding GPIO2 button to provision.");
-        rprintln!("===========================================");
-        panic!("No WiFi credentials");
-    });
     let ssid: &'static str = Box::leak(ssid.into_boxed_str());
     let password: &'static str = Box::leak(password.into_boxed_str());
 

@@ -125,6 +125,7 @@ dependencies = [
  "heapless 0.8.0",
  "ieee80211",
  "int-enum",
+ "nb 1.1.0",
  "picojson",
  "reqwless",
  "rtt-target",

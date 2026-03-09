@@ -4,11 +4,10 @@ ESP32-S3 firmware with Embassy, WiFi, and provisioning.
 
 ## Easy setup (web UI, no install)
 
-For non-technical users, a web-based setup tool lets you flash firmware and configure WiFi from your browser—no command line or drivers needed.
+A web-based flasher lets you flash firmware from your browser—no command line or drivers needed.
 
-1. Run the web setup app: `cd web && npm install && npm run dev`, then open http://localhost:5173 in Chrome or Edge. (Or use the [hosted version](https://chrisheinemeyer.github.io/bay-wheels-controller/) if GitHub Pages is enabled.)
-2. **Step 1 – Flash:** Connect your ESP32-S3 via USB, click "Connect & flash". The app downloads the latest firmware and flashes it.
-3. **Step 2 – WiFi:** Hold the **GPIO2** button, connect (or reset) the board, then enter your WiFi name and password.
+1. Run the web app: `cd web && npm install && npm run dev`, then open http://localhost:5173 in Chrome or Edge. (Or use the [hosted version](https://chrisheinemeyer.github.io/bay-wheels-controller/) if GitHub Pages is enabled.)
+2. Connect your ESP32-S3 via USB, choose firmware (latest release or upload your own), then click "Connect & flash".
 
 **Requirements:** Chrome or Edge on desktop (Web Serial API). Safari and Firefox are not supported.
 

@@ -1,271 +1,424 @@
 import { ESPLoader, Transport, FlashOptions } from "esptool-js";
 
+// Resolves relative to the current page, so it works in both local dev
+// (Vite proxy intercepts /firmware-bay-wheels-controller.bin) and on GitHub Pages
+// (bundled file is served from /bay-wheels-controller/firmware-bay-wheels-controller.bin).
+// will this work?
+const FIRMWARE_URL = new URL("firmware-bay-wheels-controller.bin", window.location.href).href;
+
 const CHUNK = 8192;
 function uint8ArrayToBinaryString(arr: Uint8Array): string {
   let s = "";
-  for (let i = 0; i < arr.length; i += CHUNK) {
+  for (let i = 0; i < arr.length; i += CHUNK)
     s += String.fromCharCode(...arr.subarray(i, i + CHUNK));
-  }
   return s;
 }
 
-const FIRMWARE_URL =
-  "https://github.com/ChrisHeinemeyer/bay-wheels-controller/releases/latest/download/firmware-bay-wheels-controller.bin";
-
-const PROVISIONING_PROMPTS = {
-  SSID: "Enter WiFi SSID: ",
-  PASSWORD: "Enter WiFi Password: ",
-  CONFIRM: "Save credentials? (y/n): ",
-} as const;
-
-type Step = "flash" | "wifi";
-
-function log(element: HTMLElement, message: string, type?: "success" | "error") {
-  const line = document.createElement("span");
-  if (type) line.className = type;
-  line.textContent = message + "\n";
-  element.appendChild(line);
-  element.scrollTop = element.scrollHeight;
+// ── Safari check ──────────────────────────────────────────────────────────────
+const isSafari = !!(window as Window & { safari?: unknown }).safari;
+if (isSafari) {
+  (document.getElementById("safariErr") as HTMLElement).style.display = "block";
+  (document.getElementById("main") as HTMLElement).style.display = "none";
 }
 
-function setStep(step: Step) {
-  document.querySelectorAll(".step").forEach((el) => el.classList.remove("active"));
-  document.querySelector(`.step[data-step="${step === "flash" ? 1 : 2}"]`)?.classList.add("active");
-  document.querySelectorAll(".panel").forEach((el) => el.classList.remove("active"));
-  document.getElementById(`panel-${step}`)?.classList.add("active");
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const flashTab         = document.getElementById("flashTab")!;
+const wifiTab          = document.getElementById("wifiTab")!;
+const tabButtons       = document.querySelectorAll<HTMLButtonElement>(".tab");
+
+const connectButton    = document.getElementById("connectButton") as HTMLButtonElement;
+const disconnectButton = document.getElementById("disconnectButton") as HTMLButtonElement;
+const programButton    = document.getElementById("programButton") as HTMLButtonElement;
+const flashOptions     = document.getElementById("flashOptions")!;
+const lblConnTo        = document.getElementById("lblConnTo")!;
+const terminal         = document.getElementById("terminal")!;
+const firmwareFile     = document.getElementById("firmwareFile") as HTMLInputElement;
+
+const wifiInstructions     = document.getElementById("wifiInstructions")!;
+const wifiInstructionsText = document.getElementById("wifiInstructionsText")!;
+const wifiConnectBtn       = document.getElementById("wifiConnectBtn") as HTMLButtonElement;
+const ssidInput            = document.getElementById("ssidInput") as HTMLInputElement;
+const passwordInput        = document.getElementById("passwordInput") as HTMLInputElement;
+const wifiConfigBtn        = document.getElementById("wifiConfigBtn") as HTMLButtonElement;
+const wifiStatus           = document.getElementById("wifiStatus")!;
+const wifiSpinner          = document.getElementById("wifiSpinner")!;
+const wifiStatusIcon       = document.getElementById("wifiStatusIcon")!;
+const wifiStatusText       = document.getElementById("wifiStatusText")!;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let device: SerialPort | null = null;
+let transport: Transport | null = null;
+let esploader: ESPLoader | null = null;
+// Set to true after a successful flash so WiFi tab knows the device is ready
+let justFlashed = false;
+// Active serial reader — must be cancelled before closing the port
+let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+// ── Port teardown ─────────────────────────────────────────────────────────────
+async function releasePort() {
+  if (activeReader) {
+    try { await activeReader.cancel(); } catch { /* ignore */ }
+    try { activeReader.releaseLock(); } catch { /* ignore */ }
+    activeReader = null;
+  }
+  if (device) {
+    try { await device.close(); } catch { /* ignore */ }
+    device = null;
+  }
 }
 
-function patchPortWithRetry(port: SerialPort): void {
-  const nativeOpen = port.open.bind(port);
-  const maxRetries = 3;
-  port.open = async (options?: SerialOptions) => {
-    const opts: SerialOptions = options ?? { baudRate: 115200 };
-    let lastErr: unknown;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        await nativeOpen(opts);
-        return;
-      } catch (err) {
-        lastErr = err;
-        const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
-        const isRetryable = msg.includes("already open") || msg.includes("locked stream");
-        if (!isRetryable || attempt === maxRetries) throw err;
-        try {
-          await port.close();
-        } catch {
-          // Ignore - port may have locked streams
-        }
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-      }
-    }
-    throw lastErr;
-  };
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function showTab(name: "flash" | "wifi") {
+  flashTab.style.display = name === "flash" ? "" : "none";
+  wifiTab.style.display  = name === "wifi"  ? "" : "none";
+  tabButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === name));
+  if (name === "wifi") setupWifiTab();
 }
 
-function checkWebSerial() {
+tabButtons.forEach(btn => {
+  btn.addEventListener("click", () => showTab(btn.dataset.tab as "flash" | "wifi"));
+});
+
+// Submit WiFi credentials on Enter from either input field
+[ssidInput, passwordInput].forEach(input => {
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") wifiConfigBtn.click();
+  });
+});
+
+// ── Flash console ─────────────────────────────────────────────────────────────
+function log(msg: string) {
+  terminal.textContent += msg + "\n";
+  terminal.scrollTop = terminal.scrollHeight;
+}
+function logClear() { terminal.textContent = ""; }
+
+const espLoaderTerminal = {
+  clean: () => logClear(),
+  writeLine: (data: string) => log(data),
+  write: (data: string) => { terminal.textContent += data; terminal.scrollTop = terminal.scrollHeight; },
+};
+
+// ── Flash: connect ────────────────────────────────────────────────────────────
+connectButton.onclick = async () => {
   if (!("serial" in navigator)) {
-    alert(
-      "Web Serial API is not supported in this browser. Please use Chrome or Edge on desktop."
-    );
-    return false;
+    alert("Web Serial API is not supported. Use Chrome or Edge.");
+    return;
   }
-  return true;
-}
+  try {
+    // Cancel any in-flight provisioning reader and close any open port before
+    // handing a fresh handle to esptool.
+    await releasePort();
+    device = await navigator.serial.requestPort();
+    transport = new Transport(device);
+    esploader = new ESPLoader({
+      transport,
+      baudrate: 921600,
+      romBaudrate: 115200,
+      terminal: espLoaderTerminal,
+    });
+    const chip = await esploader.main();
 
-async function getFirmwareData(): Promise<Uint8Array> {
-  const source = (document.querySelector('input[name="firmware"]:checked') as HTMLInputElement)
-    ?.value;
-  const fileInput = document.getElementById("firmware-file") as HTMLInputElement;
+    lblConnTo.textContent = "Connected: " + chip;
+    lblConnTo.style.display = "inline";
+    connectButton.style.display = "none";
+    disconnectButton.style.display = "inline";
+    flashOptions.style.display = "block";
+  } catch (e) {
+    log("Error: " + (e instanceof Error ? e.message : String(e)));
+  }
+};
 
-  if (source === "file" && fileInput?.files?.length) {
-    const file = fileInput.files[0];
-    return new Uint8Array(await file.arrayBuffer());
+// ── Flash: disconnect ─────────────────────────────────────────────────────────
+disconnectButton.onclick = async () => {
+  if (transport) await transport.disconnect();
+  logClear();
+  connectButton.style.display = "inline";
+  disconnectButton.style.display = "none";
+  lblConnTo.style.display = "none";
+  flashOptions.style.display = "none";
+  device = null; transport = null; esploader = null; justFlashed = false;
+};
+
+// ── Flash: program ────────────────────────────────────────────────────────────
+programButton.onclick = async () => {
+  if (!esploader) return;
+
+  const source = (document.querySelector('input[name="firmware"]:checked') as HTMLInputElement)?.value;
+  let firmwareData: Uint8Array;
+
+  if (source === "file" && firmwareFile.files?.length) {
+    firmwareData = new Uint8Array(await firmwareFile.files[0].arrayBuffer());
+  } else {
+    log("Downloading firmware from latest release...");
+    const res = await fetch(FIRMWARE_URL);
+    if (!res.ok) throw new Error("Failed to download firmware: " + res.status);
+    firmwareData = new Uint8Array(await res.arrayBuffer());
+    log(`Downloaded ${(firmwareData.length / 1024).toFixed(1)} KB`);
   }
 
-  const logEl = document.getElementById("flash-log")!;
-  log(logEl, "Downloading firmware from GitHub...");
-  const res = await fetch(FIRMWARE_URL);
-  if (!res.ok) throw new Error(`Failed to download firmware: ${res.status}`);
-  const buf = await res.arrayBuffer();
-  log(logEl, `Downloaded ${(buf.byteLength / 1024).toFixed(1)} KB`);
-  return new Uint8Array(buf);
-}
-
-async function runFlash() {
-  if (!checkWebSerial()) return;
-
-  const logEl = document.getElementById("flash-log")!;
-  const progressEl = document.getElementById("flash-progress")!;
-  const progressBar = progressEl.querySelector(".progress-bar") as HTMLElement;
-  const progressText = progressEl.querySelector(".progress-text") as HTMLElement;
-  const btn = document.getElementById("btn-flash") as HTMLButtonElement;
-
-  logEl.innerHTML = "";
-  progressEl.classList.remove("hidden");
-  btn.disabled = true;
+  const progressEl = document.getElementById("progress0")!;
 
   try {
-    for (const p of await navigator.serial.getPorts()) {
-      try {
-        await p.close();
-      } catch {
-        /* ignore */
-      }
-    }
-    await new Promise((r) => setTimeout(r, 200));
-    const port = await navigator.serial.requestPort();
-    log(logEl, "Connecting to device...");
-
-    patchPortWithRetry(port);
-    const transport = new Transport(port);
-    await transport.connect(115200);
-
-    const terminal = {
-      clean: () => {},
-      write: (data: string) => log(logEl, data.trim()),
-      writeLine: (data: string) => log(logEl, data),
-    };
-
-    const loader = new ESPLoader({
-      transport,
-      baudrate: 115200,
-      romBaudrate: 115200,
-      terminal,
-    });
-
-    await loader.connect();
-    log(logEl, `Connected to ${loader.chip.CHIP_NAME}`);
-
-    const firmwareData = await getFirmwareData();
-
+    programButton.disabled = true;
     const options: FlashOptions = {
-      fileArray: [{ address: 0, data: uint8ArrayToBinaryString(firmwareData) }],
+      fileArray: [{ address: 0x0, data: uint8ArrayToBinaryString(firmwareData) }],
       flashSize: "keep",
       flashMode: "keep",
       flashFreq: "keep",
-      compress: true,
       eraseAll: true,
-      reportProgress: (_fileIndex, written, total) => {
-        const pct = total > 0 ? Math.round((written / total) * 100) : 0;
-        progressBar.style.setProperty("--progress", `${pct}%`);
-        progressText.textContent = `Flashing... ${pct}%`;
+      compress: true,
+      reportProgress: (_i, written, total) => {
+        progressEl.textContent = total > 0 ? Math.round((written / total) * 100) + "%" : "";
       },
     };
+    await esploader.writeFlash(options);
+    await esploader.after("hard_reset", true);
+    log("Firmware flashed! Switching to WiFi setup...");
 
-    await loader.writeFlash(options);
-    log(logEl, "Firmware flashed successfully!", "success");
+    // The hard reset causes USB re-enumeration — the old SerialPort handle is
+    // invalid after the device reappears. Drop it entirely and let the user
+    // connect fresh in the WiFi tab (same path that already works reliably).
+    try { await transport!.disconnect(); } catch { /* ignore */ }
+    transport = null; esploader = null;
+    try { await device!.close(); } catch { /* ignore */ }
+    device = null;
 
-    await loader.after("hard_reset", true);
-    await transport.disconnect();
-
-    log(logEl, "Device is rebooting. You can now configure WiFi (Step 2).");
-    setStep("wifi");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log(logEl, `Error: ${msg}`, "error");
+    justFlashed = true;
+    showTab("wifi");
+  } catch (e) {
+    log("Error: " + (e instanceof Error ? e.message : String(e)));
   } finally {
-    progressEl.classList.add("hidden");
-    btn.disabled = false;
+    programButton.disabled = false;
+    progressEl.textContent = "";
+  }
+};
+
+// ── WiFi tab setup ────────────────────────────────────────────────────────────
+function setupWifiTab() {
+  setWifiStatus("idle");
+
+  if (!device) {
+    if (justFlashed) {
+      // Post-flash: USB re-enumerates after hard reset, needs a fresh connection
+      wifiInstructionsText.textContent =
+        "Firmware flashed! Unplug the device, plug it back in, then click Connect.";
+    } else {
+      // Standalone: user needs to enter provisioning mode via GPIO2
+      wifiInstructionsText.innerHTML =
+        "Hold the <strong>GPIO2</strong> button while power cycling your board " +
+        "to enter WiFi setup mode, then click Connect.";
+    }
+    wifiInstructions.style.display = "block";
+    wifiConnectBtn.style.display = "inline-block";
+  } else {
+    wifiInstructions.style.display = "none";
   }
 }
 
-async function runProvision() {
-  if (!checkWebSerial()) return;
+wifiConnectBtn.onclick = async () => {
+  if (!("serial" in navigator)) {
+    alert("Web Serial API is not supported. Use Chrome or Edge.");
+    return;
+  }
+  try {
+    device = await navigator.serial.requestPort();
+    wifiInstructions.style.display = "none";
+  } catch (e) {
+    if ((e as Error).name !== "NotAllowedError")
+      alert("Could not open port: " + (e instanceof Error ? e.message : String(e)));
+  }
+};
 
-  const ssid = (document.getElementById("wifi-ssid") as HTMLInputElement).value.trim();
-  const password = (document.getElementById("wifi-password") as HTMLInputElement).value.trim();
-  const logEl = document.getElementById("wifi-log")!;
-  const btn = document.getElementById("btn-provision") as HTMLButtonElement;
+// ── WiFi status helpers ───────────────────────────────────────────────────────
+type WifiStatusState = "idle" | "working" | "success" | "error";
 
-  if (!ssid) {
-    log(logEl, "Please enter your WiFi network name.", "error");
+function setWifiStatus(state: WifiStatusState, message = "") {
+  wifiStatus.style.display = state === "idle" ? "none" : "flex";
+  wifiSpinner.style.display = state === "working" ? "inline-block" : "none";
+  wifiStatusIcon.style.display = state === "success" || state === "error" ? "inline" : "none";
+  wifiStatusText.textContent = message;
+
+  wifiConfigBtn.disabled = state === "working";
+  ssidInput.disabled = state === "working";
+  passwordInput.disabled = state === "working";
+
+  if (state === "success") {
+    wifiStatusIcon.textContent = "✓";
+    wifiStatusIcon.className = "status-icon success";
+  } else if (state === "error") {
+    wifiStatusIcon.textContent = "✗";
+    wifiStatusIcon.className = "status-icon error";
+  } else {
+    wifiStatusIcon.className = "status-icon";
+  }
+}
+
+// ── WiFi: configure button ────────────────────────────────────────────────────
+wifiConfigBtn.onclick = async () => {
+  const ssid = ssidInput.value.trim();
+  if (!ssid) { ssidInput.focus(); return; }
+  if (!device) {
+    alert("Connect to your device first.");
     return;
   }
 
-  logEl.innerHTML = "";
-  btn.disabled = true;
+  setWifiStatus("working", "Connecting...");
+  try {
+    if (!device.readable) {
+      await device.open({ baudRate: 115200 });
+    }
+    await runProvisioning(
+      device,
+      ssid,
+      passwordInput.value,
+      (msg, done, isError) => {
+        if (done)        setWifiStatus("success", msg);
+        else if (isError) setWifiStatus("error", msg);
+        else              setWifiStatus("working", msg);
+      }
+    );
+  } catch (e) {
+    setWifiStatus("error", e instanceof Error ? e.message : String(e));
+  } finally {
+    await releasePort();
+  }
+};
+
+// ── Provisioning state machine ────────────────────────────────────────────────
+function provLog(msg: string) {
+  console.log(`[provisioning] ${msg}`);
+}
+
+async function runProvisioning(
+  port: SerialPort,
+  ssid: string,
+  password: string,
+  onStatus: (msg: string, done?: boolean, error?: boolean) => void
+): Promise<void> {
+  const dec = new TextDecoder();
+  const enc = new TextEncoder();
+  let buf = "";
+  type State = "ssid" | "pwd" | "confirm" | "result";
+  let state: State = "ssid";
+
+  async function send(text: string) {
+    provLog(`→ sending: ${text === password ? "***" : JSON.stringify(text)}`);
+    const writer = port.writable!.getWriter();
+    // Firmware's drain_newline() reads one extra byte after \r or \n, expecting CRLF.
+    // Send \r\n so drain_newline consumes the \n and doesn't block.
+    try { await writer.write(enc.encode(text + "\r\n")); }
+    finally { writer.releaseLock(); }
+  }
+
+  async function ensureOpen() {
+    provLog(`port.readable=${port.readable != null}`);
+    if (!port.readable) {
+      provLog("opening port at 115200...");
+      await port.open({ baudRate: 115200 });
+      provLog("port opened");
+    }
+  }
+
+  const deadline = Date.now() + 120_000; // 2 min overall timeout
+  provLog("starting (state=ssid)");
+  onStatus("Waiting for device...");
+
+  await ensureOpen();
+  let reader = port.readable!.getReader();
+  activeReader = reader;
+  provLog("reader acquired, entering read loop");
 
   try {
-    for (const p of await navigator.serial.getPorts()) {
+    while (Date.now() < deadline) {
+      let value: Uint8Array | undefined;
+
       try {
-        await p.close();
-      } catch {
-        /* ignore */
+        // Race the read against a 5 s timeout so we don't block forever
+        const raceResult = await Promise.race([
+          reader.read() as Promise<ReadableStreamReadResult<Uint8Array>>,
+          new Promise<ReadableStreamReadResult<Uint8Array>>(resolve =>
+            setTimeout(() => resolve({ value: new Uint8Array(0), done: false }), 5_000)
+          ),
+        ]);
+        if (raceResult.done) {
+          provLog("stream done — USB re-enumerated");
+          throw new Error("stream-ended");
+        }
+        value = raceResult.value;
+        if (value && value.length > 0) {
+          const chunk = dec.decode(value);
+          provLog(`← rx (${value.length}B): ${JSON.stringify(chunk)}`);
+        } else {
+          provLog(`← timeout tick (state=${state}, buf=${JSON.stringify(buf.slice(-80))})`);
+        }
+      } catch (err) {
+        provLog(`read error: ${err} — assuming mid-reboot disconnect`);
+        // Port disconnected mid-reboot; release lock, wait, then reopen
+        try { reader.releaseLock(); } catch { /* empty */ }
+        onStatus("Device rebooting, waiting...");
+        try { await port.close(); } catch { /* empty */ }
+        provLog("sleeping 3 s before reopen...");
+        await sleep(3_000);
+        provLog("attempting reopen...");
+        await ensureOpen().catch((e) => provLog(`reopen failed: ${e}`));
+        reader = port.readable!.getReader();
+        activeReader = reader;
+        provLog("reader re-acquired after reboot");
+        buf = "";
+        continue;
       }
-    }
-    await new Promise((r) => setTimeout(r, 200));
-    const port = await navigator.serial.requestPort();
-    log(logEl, "Connecting to device...");
 
-    patchPortWithRetry(port);
-    await port.open({ baudRate: 115200 });
+      if (value && value.length > 0) buf += dec.decode(value);
 
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    const writer = port.writable!.getWriter();
-    const reader = port.readable!.getReader();
-
-    const send = (text: string) => {
-      writer.write(encoder.encode(text + "\r\n"));
-    };
-
-    const readUntilPrompt = async (prompt: string) => {
-      while (!buffer.includes(prompt)) {
-        const { value, done } = await reader.read();
-        if (done) throw new Error("Connection closed");
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (line.trim()) log(logEl, line);
+      if (state === "ssid") {
+        if (buf.includes("Enter WiFi SSID:")) {
+          provLog("matched 'Enter WiFi SSID:' → sending SSID, moving to pwd");
+          onStatus("Sending SSID...");
+          await send(ssid);
+          state = "pwd"; buf = "";
+        }
+      } else if (state === "pwd") {
+        if (buf.includes("Enter WiFi SSID:")) {
+          // Speculative send landed before the device was ready — re-send SSID now
+          provLog("saw SSID prompt while in pwd state — re-sending SSID");
+          onStatus("Sending SSID...");
+          await send(ssid);
+          buf = "";
+        } else if (buf.includes("Enter WiFi Password:")) {
+          provLog("matched 'Enter WiFi Password:' → sending password, moving to confirm");
+          onStatus("Sending password...");
+          await send(password);
+          state = "confirm"; buf = "";
+        }
+      } else if (state === "confirm") {
+        if (buf.includes("Save credentials?")) {
+          provLog("matched 'Save credentials?' → sending y, moving to result");
+          onStatus("Saving...");
+          await send("y");
+          state = "result"; buf = "";
+        }
+      } else if (state === "result") {
+        if (buf.includes("Credentials saved successfully!")) {
+          provLog("matched 'Credentials saved successfully!' → done!");
+          onStatus("WiFi configured!", true);
+          return;
+        }
+        if (buf.includes("Error saving credentials")) {
+          provLog("matched 'Error saving credentials' → waiting for reboot + re-prompt");
+          // Device will reboot and re-enter provisioning — just wait for the next SSID prompt
+          onStatus("Rebooting to retry, please wait...");
+          state = "ssid"; buf = "";
         }
       }
-    };
-
-    await readUntilPrompt(PROVISIONING_PROMPTS.SSID);
-    log(logEl, "Sending SSID...");
-    send(ssid);
-
-    await readUntilPrompt(PROVISIONING_PROMPTS.PASSWORD);
-    log(logEl, "Sending password...");
-    send(password);
-
-    await readUntilPrompt(PROVISIONING_PROMPTS.CONFIRM);
-    log(logEl, "Confirming save...");
-    send("y");
-
-    await new Promise((r) => setTimeout(r, 2000));
-    const { value } = await reader.read();
-    if (value) buffer += decoder.decode(value);
-    if (buffer.includes("Credentials saved") || buffer.includes("successfully")) {
-      log(logEl, "WiFi configured successfully! Device is rebooting.", "success");
-    } else {
-      log(logEl, "Provisioning complete. Check device output above.");
     }
-
-    writer.releaseLock();
-    reader.releaseLock();
-    await port.close();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log(logEl, `Error: ${msg}`, "error");
+    provLog("timed out after 2 minutes");
+    throw new Error("Configuration timed out after 2 minutes");
   } finally {
-    btn.disabled = false;
+    try { reader.releaseLock(); } catch { /* empty */ }
+    activeReader = null;
+    provLog("reader released");
   }
 }
 
-document.getElementById("btn-flash")?.addEventListener("click", runFlash);
-document.getElementById("btn-provision")?.addEventListener("click", runProvision);
-
-document.querySelectorAll('input[name="firmware"]').forEach((radio) => {
-  radio.addEventListener("change", () => {
-    const fileInput = document.getElementById("file-input")!;
-    fileInput.classList.toggle(
-      "hidden",
-      (document.querySelector('input[name="firmware"]:checked') as HTMLInputElement)?.value !==
-        "file"
-    );
-  });
-});
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }

@@ -3,97 +3,83 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bay Wheels Controller - Setup</title>
+    <title>Bay Wheels Controller</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div class="app">
+    <div id="safariErr" style="display: none;">
+      This tool is not supported on Safari browser!
+    </div>
+    <div id="main">
       <header>
         <h1>Bay Wheels Controller</h1>
-        <p class="subtitle">Easy setup for your board</p>
       </header>
 
-      <main>
-        <div class="wizard">
-          <div class="steps">
-            <div class="step" data-step="1">
-              <span class="step-num">1</span>
-              <span class="step-label">Flash firmware</span>
-            </div>
-            <div class="step" data-step="2">
-              <span class="step-num">2</span>
-              <span class="step-label">Configure WiFi</span>
-            </div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="flash">1 · Flash</button>
+        <button class="tab" data-tab="wifi">2 · WiFi Setup</button>
+      </nav>
+
+      <!-- Tab 1: Flash -->
+      <div id="flashTab">
+        <section class="card">
+          <div class="connect-row">
+            <span id="lblConnTo" style="display: none;"></span>
+            <button type="button" id="connectButton" class="btn btn-primary">Connect</button>
+            <button type="button" id="disconnectButton" class="btn" style="display: none;">Disconnect</button>
           </div>
 
-          <div class="panels">
-            <section class="panel active" id="panel-flash">
-              <h2>Step 1: Flash firmware</h2>
-              <p class="instruction">
-                Connect your ESP32-S3 board via USB. If this is your first time,
-                you'll need to flash the firmware.
-              </p>
-              <div class="firmware-source">
-                <label>
-                  <input type="radio" name="firmware" value="download" checked />
-                  Download from latest release
-                </label>
-                <label>
-                  <input type="radio" name="firmware" value="file" />
-                  I have a firmware file
-                </label>
-              </div>
-              <div class="file-input hidden" id="file-input">
-                <input type="file" id="firmware-file" accept=".bin" />
-              </div>
-              <div class="actions">
-                <button type="button" id="btn-flash" class="btn btn-primary">
-                  Connect & flash
-                </button>
-              </div>
-              <div class="progress hidden" id="flash-progress">
-                <div class="progress-bar"></div>
-                <span class="progress-text">Flashing...</span>
-              </div>
-              <div class="log" id="flash-log"></div>
-            </section>
-
-            <section class="panel" id="panel-wifi">
-              <h2>Step 2: Configure WiFi</h2>
-              <p class="instruction">
-                Hold the <strong>Flash button</strong> on your board, then
-                connect via USB (or reset the board while holding the button).
-                Release the button when you see the provisioning prompt.
-              </p>
-              <div class="form">
-                <label>
-                  <span>WiFi network name (SSID)</span>
-                  <input type="text" id="wifi-ssid" placeholder="Your WiFi name" />
-                </label>
-                <label>
-                  <span>WiFi password</span>
-                  <input
-                    type="password"
-                    id="wifi-password"
-                    placeholder="Your WiFi password"
-                  />
-                </label>
-              </div>
-              <div class="actions">
-                <button type="button" id="btn-provision" class="btn btn-primary">
-                  Connect & configure
-                </button>
-              </div>
-              <div class="log" id="wifi-log"></div>
-            </section>
+          <div id="flashOptions" style="display: none;">
+            <div class="firmware-source">
+              <label><input type="radio" name="firmware" value="download" checked /> Use latest release from GitHub</label>
+              <label><input type="radio" name="firmware" value="file" /> Upload a .bin file: <input type="file" id="firmwareFile" accept=".bin" /></label>
+            </div>
+            <div class="actions">
+              <button type="button" id="programButton" class="btn btn-primary">Program</button>
+              <span class="progress-cell" id="progress0"></span>
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div class="browser-note">
-          <strong>Browser support:</strong> Chrome or Edge (desktop) required.
-          Web Serial API is not supported in Safari or Firefox.
-        </div>
-      </main>
+        <section class="card console-card">
+          <h2>Console</h2>
+          <pre id="terminal"></pre>
+        </section>
+      </div>
+
+      <!-- Tab 2: WiFi Setup -->
+      <div id="wifiTab" style="display: none;">
+        <section class="card">
+          <div id="wifiInstructions" class="instructions" style="display: none;">
+            <p id="wifiInstructionsText"></p>
+            <button type="button" id="wifiConnectBtn" class="btn btn-primary" style="display: none;">
+              Connect to Device
+            </button>
+          </div>
+
+          <div id="wifiForm">
+            <div class="field-group">
+              <label for="ssidInput">WiFi Network</label>
+              <input type="text" id="ssidInput" placeholder="Network name"
+                     autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="field-group">
+              <label for="passwordInput">Password</label>
+              <input type="password" id="passwordInput" placeholder="Leave blank if open network"
+                     autocomplete="off" />
+            </div>
+            <button type="button" id="wifiConfigBtn" class="btn btn-primary">
+              Configure WiFi
+            </button>
+          </div>
+
+          <div id="wifiStatus" style="display: none;" class="status-row">
+            <span class="spinner" id="wifiSpinner" style="display: none;"></span>
+            <span class="status-icon" id="wifiStatusIcon" style="display: none;"></span>
+            <span id="wifiStatusText"></span>
+          </div>
+        </section>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

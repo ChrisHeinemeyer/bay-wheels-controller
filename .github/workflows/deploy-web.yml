@@ -6,6 +6,8 @@ on:
     paths:
       - 'web/**'
       - '.github/workflows/deploy-web.yml'
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -39,6 +41,11 @@ jobs:
           cd web
           npm ci
           GITHUB_PAGES=1 npm run build
+
+      - name: Download firmware
+        run: |
+          curl -fsSL -o web/dist/firmware-bay-wheels-controller.bin \
+            "https://github.com/ChrisHeinemeyer/bay-wheels-controller/releases/latest/download/firmware-bay-wheels-controller.bin"
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
