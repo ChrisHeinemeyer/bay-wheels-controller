@@ -35,15 +35,6 @@ function setStep(step: Step) {
   document.getElementById(`panel-${step}`)?.classList.add("active");
 }
 
-async function ensurePortReady(port: SerialPort): Promise<void> {
-  try {
-    await port.close();
-  } catch {
-    // Port may not be open, ignore
-  }
-  await new Promise((r) => setTimeout(r, 300));
-}
-
 function patchPortWithRetry(port: SerialPort): void {
   const originalOpen = port.open.bind(port);
   port.open = async (options?: SerialOptions) => {
@@ -53,9 +44,14 @@ function patchPortWithRetry(port: SerialPort): void {
     } catch (err) {
       if (
         err instanceof Error &&
-        err.message?.toLowerCase().includes("already open")
+        (err.message?.toLowerCase().includes("already open") ||
+          err.message?.toLowerCase().includes("locked stream"))
       ) {
-        await port.close();
+        try {
+          await port.close();
+        } catch {
+          // Ignore - port may have locked streams from another owner
+        }
         await new Promise((r) => setTimeout(r, 500));
         await originalOpen(opts);
       } else {
@@ -111,7 +107,6 @@ async function runFlash() {
     const port = await navigator.serial.requestPort();
     log(logEl, "Connecting to device...");
 
-    await ensurePortReady(port);
     patchPortWithRetry(port);
     const transport = new Transport(port);
     await transport.connect(115200);
@@ -185,7 +180,6 @@ async function runProvision() {
     const port = await navigator.serial.requestPort();
     log(logEl, "Connecting to device...");
 
-    await ensurePortReady(port);
     patchPortWithRetry(port);
     await port.open({ baudRate: 115200 });
 
