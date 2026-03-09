@@ -36,28 +36,29 @@ function setStep(step: Step) {
 }
 
 function patchPortWithRetry(port: SerialPort): void {
-  const originalOpen = port.open.bind(port);
+  const nativeOpen = port.open.bind(port);
+  const maxRetries = 3;
   port.open = async (options?: SerialOptions) => {
     const opts: SerialOptions = options ?? { baudRate: 115200 };
-    try {
-      await originalOpen(opts);
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.message?.toLowerCase().includes("already open") ||
-          err.message?.toLowerCase().includes("locked stream"))
-      ) {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await nativeOpen(opts);
+        return;
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+        const isRetryable = msg.includes("already open") || msg.includes("locked stream");
+        if (!isRetryable || attempt === maxRetries) throw err;
         try {
           await port.close();
         } catch {
-          // Ignore - port may have locked streams from another owner
+          // Ignore - port may have locked streams
         }
-        await new Promise((r) => setTimeout(r, 500));
-        await originalOpen(opts);
-      } else {
-        throw err;
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
       }
     }
+    throw lastErr;
   };
 }
 
@@ -104,6 +105,14 @@ async function runFlash() {
   btn.disabled = true;
 
   try {
+    for (const p of await navigator.serial.getPorts()) {
+      try {
+        await p.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 200));
     const port = await navigator.serial.requestPort();
     log(logEl, "Connecting to device...");
 
@@ -177,6 +186,14 @@ async function runProvision() {
   btn.disabled = true;
 
   try {
+    for (const p of await navigator.serial.getPorts()) {
+      try {
+        await p.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 200));
     const port = await navigator.serial.requestPort();
     log(logEl, "Connecting to device...");
 
