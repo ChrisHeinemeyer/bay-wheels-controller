@@ -18,6 +18,7 @@
       <nav class="tabs">
         <button class="tab active" data-tab="flash">1 · Flash</button>
         <button class="tab" data-tab="wifi">2 · WiFi Setup</button>
+        <button class="tab" data-tab="status">3 · Status</button>
       </nav>
 
       <!-- Tab 1: Flash -->
@@ -79,6 +80,59 @@
             <span id="wifiStatusText"></span>
           </div>
         </section>
+      </div>
+      <!-- Tab 3: Status Monitor -->
+      <div id="statusTab" style="display: none;">
+        <section class="card">
+          <div class="connect-row">
+            <button type="button" id="statusConnectBtn" class="btn btn-primary">Connect</button>
+            <button type="button" id="statusDisconnectBtn" class="btn" style="display: none;">Disconnect</button>
+            <span id="statusConnLabel" style="display: none; color: var(--text-muted); font-size: 0.85rem;"></span>
+          </div>
+          <p style="margin: 0; font-size: 0.85rem; color: var(--text-muted);">
+            Connect to the device running normal firmware to stream live status.
+          </p>
+        </section>
+
+        <div id="statusDisplay" style="display: none;">
+          <div class="status-grid">
+            <section class="card">
+              <h2>Battery</h2>
+              <div class="metric-value" id="statusBatteryVal">--%</div>
+              <div class="battery-track"><div class="battery-fill" id="statusBatteryBar"></div></div>
+            </section>
+
+            <section class="card">
+              <h2>WiFi</h2>
+              <div class="metric-row">
+                <span class="dot" id="statusWifiDot"></span>
+                <span id="statusWifiText">--</span>
+              </div>
+              <div style="margin-top: 0.4rem; font-size: 0.85rem; color: var(--text-muted);">
+                RSSI: <span id="statusRssi">--</span>
+              </div>
+            </section>
+
+            <section class="card">
+              <h2>GBFS Fetch</h2>
+              <div class="metric-value" id="statusFetchAge">--</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">age of last request</div>
+            </section>
+
+            <section class="card">
+              <h2>Input</h2>
+              <div class="metric-value" id="statusInput" style="font-size: 0.9rem;">--</div>
+            </section>
+          </div>
+
+          <section class="card">
+            <h2>LED States</h2>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+              Top row: eBike LEDs (0–5) · Bottom row: Mechanical LEDs (11–6)
+            </div>
+            <div class="led-grid" id="statusLeds"></div>
+          </section>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

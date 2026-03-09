@@ -4,7 +4,7 @@ use embassy_net::{
     dns::DnsSocket,
     tcp::client::{TcpClient, TcpClientState},
 };
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use reqwless::{
     client::{HttpClient, TlsConfig, TlsVerify},
     request::{Method, RequestBuilder},
@@ -14,7 +14,10 @@ use static_cell::StaticCell;
 
 use crate::{
     stations::TARGET_STATIONS,
-    tasks::{signals::STATION_DATA_SIGNAL, station_parser::StationData},
+    tasks::{
+        signals::{STATION_DATA_SIGNAL, STATUS},
+        station_parser::StationData,
+    },
 };
 
 // Start with a simple API that has a tiny response (~200 bytes)
@@ -105,6 +108,7 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
                                     rprintln!("✓ Stream complete! Total: {} bytes", total_bytes);
                                     parser.finish();
                                     STATION_DATA_SIGNAL.signal(station_data);
+                                    STATUS.lock().await.last_fetch_at = Some(Instant::now());
                                     break;
                                 }
                                 Ok(n) => {

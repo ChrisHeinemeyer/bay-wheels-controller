@@ -2,7 +2,8 @@ use embassy_time::{Duration, Timer};
 use rtt_target::rprintln;
 
 use crate::spi_devices;
-use crate::tasks::signals::{STATION_SIGNAL, StationIdx};
+use crate::tasks::signals::{STATION_SIGNAL, STATUS, StationIdx};
+
 #[embassy_executor::task]
 pub async fn input_read_task(
     mut shift_register: spi_devices::shift_register::ShiftRegister<'static>,
@@ -14,6 +15,7 @@ pub async fn input_read_task(
             Ok(value) => {
                 let station = value_to_station(value);
                 STATION_SIGNAL.signal(station);
+                STATUS.lock().await.station_input = station;
             }
             Err(e) => {
                 rprintln!("Error: {:?}", e);

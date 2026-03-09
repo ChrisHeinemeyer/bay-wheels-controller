@@ -276,3 +276,75 @@ section {
   word-break: break-all;
   margin: 0;
 }
+
+/* ── Status tab ── */
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 480px) {
+  .status-grid { grid-template-columns: 1fr; }
+}
+
+.metric-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.dot.connected { background: var(--success); }
+.dot.disconnected { background: var(--error); }
+
+.battery-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.battery-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--success);
+  transition: width 0.4s, background 0.4s;
+  width: 0%;
+}
+
+.led-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.5rem;
+}
+
+.led-circle {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: background-color 0.15s;
+  position: relative;
+}
+
+.led-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 0.15rem;
+}

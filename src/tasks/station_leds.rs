@@ -5,6 +5,7 @@ use crate::spi_devices::al5887::enums::Color;
 use crate::spi_devices::al5887::enums::Led;
 use crate::tasks::signals::STATION_DATA_SIGNAL;
 use crate::tasks::signals::STATION_SIGNAL;
+use crate::tasks::signals::STATUS;
 use crate::tasks::signals::StationIdx;
 use crate::tasks::station_parser::StationData;
 use embassy_time::{Duration, Timer};
@@ -29,12 +30,20 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
             }
             last_station = station;
             if station == StationIdx::None {
+                STATUS.lock().await.led_states = [(0, 0, 0); 12];
                 al5887
                     .set_all_leds_brightness_color(0, Color::new(0, 0, 0))
                     .await
                     .unwrap();
             } else {
                 let leds = get_leds(station, station_data);
+                {
+                    let mut guard = STATUS.lock().await;
+                    guard.led_states = [(0, 0, 0); 12];
+                    for (led, color) in leds.iter() {
+                        guard.led_states[*led as usize] = (color.r, color.g, color.b);
+                    }
+                }
                 al5887.set_vec_led(leds).await.unwrap();
             }
         }

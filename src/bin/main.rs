@@ -17,7 +17,7 @@ use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup, usb_serial_jtag::U
 use esp_storage::FlashStorage;
 use rtt_target::rprintln;
 
-use bay_wheels_controller::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
+use bay_wheels_controller::tasks::{blink, fetch, input_read, serial_status, station_leds, wifi_connect};
 use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -201,6 +201,10 @@ async fn main(spawner: Spawner) -> ! {
         ),
     );
 
+    // Serial status reporter — USB_DEVICE is free in normal (non-provisioning) boot.
+    // Async mode so writes time out instead of blocking when no host is listening.
+    let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE).into_async();
+
     // Spawn tasks
     rprintln!("Spawning tasks...");
     spawner
@@ -215,6 +219,9 @@ async fn main(spawner: Spawner) -> ! {
     spawner
         .spawn(input_read::input_read_task(shift_register))
         .expect("Failed to spawn input_read_task");
+    spawner
+        .spawn(serial_status::serial_status_task(usb_serial))
+        .expect("Failed to spawn serial_status_task");
     rprintln!("All tasks spawned!");
 
     // Main loop - keep alive

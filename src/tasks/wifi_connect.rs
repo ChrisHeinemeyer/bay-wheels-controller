@@ -3,6 +3,8 @@ use embassy_time::{Duration, Timer};
 use esp_radio::wifi::{AuthMethod, WifiController};
 use rtt_target::rprintln;
 
+use crate::tasks::signals::STATUS;
+
 #[embassy_executor::task]
 pub async fn wifi_connect_task(
     mut controller: WifiController<'static>,
@@ -95,6 +97,11 @@ pub async fn wifi_connect_task(
 
         if is_connected {
             rprintln!("✓ WiFi connected successfully!");
+            {
+                let mut guard = STATUS.lock().await;
+                guard.wifi_connected = true;
+                guard.rssi = target_ap.signal_strength as i8;
+            }
             break;
         }
 
@@ -124,7 +131,9 @@ pub async fn wifi_connect_task(
 
     // Keep WiFi connection alive
     loop {
-        if !controller.is_connected().unwrap_or(false) {
+        let connected = controller.is_connected().unwrap_or(false);
+        STATUS.lock().await.wifi_connected = connected;
+        if !connected {
             rprintln!("⚠ WiFi disconnected! Attempting reconnect...");
             let _ = controller.connect();
         }

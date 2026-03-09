@@ -24,6 +24,7 @@ if (isSafari) {
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const flashTab         = document.getElementById("flashTab")!;
 const wifiTab          = document.getElementById("wifiTab")!;
+const statusTab        = document.getElementById("statusTab")!;
 const tabButtons       = document.querySelectorAll<HTMLButtonElement>(".tab");
 
 const connectButton    = document.getElementById("connectButton") as HTMLButtonElement;
@@ -68,15 +69,16 @@ async function releasePort() {
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
-function showTab(name: "flash" | "wifi") {
-  flashTab.style.display = name === "flash" ? "" : "none";
-  wifiTab.style.display  = name === "wifi"  ? "" : "none";
+function showTab(name: "flash" | "wifi" | "status") {
+  flashTab.style.display  = name === "flash"  ? "" : "none";
+  wifiTab.style.display   = name === "wifi"   ? "" : "none";
+  statusTab.style.display = name === "status" ? "" : "none";
   tabButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === name));
   if (name === "wifi") setupWifiTab();
 }
 
 tabButtons.forEach(btn => {
-  btn.addEventListener("click", () => showTab(btn.dataset.tab as "flash" | "wifi"));
+  btn.addEventListener("click", () => showTab(btn.dataset.tab as "flash" | "wifi" | "status"));
 });
 
 // Submit WiFi credentials on Enter from either input field
@@ -422,3 +424,250 @@ async function runProvisioning(
 }
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Status tab ────────────────────────────────────────────────────────────────
+
+// Frame layout: 46 bytes
+// [0]    magic   = 0xAB
+// [1]    battery_pct  u8
+// [2]    wifi_connected  u8 (0/1)
+// [3]    rssi  i8 (as u8 bits)
+// [4..8] fetch_age_secs  u32 LE  (0xFFFFFFFF = never)
+// [8]    station_input  u8
+// [9..45] led_rgb  [u8; 36]  (12 LEDs × r,g,b)
+// [45]   XOR checksum of bytes 0–44
+const STATUS_MAGIC      = 0xAB;
+const STATUS_FRAME_SIZE = 46;
+
+const STATION_NAMES: Record<number, string> = {
+  0:   "McAllister & Arguello",
+  1:   "Arguello & Edward",
+  2:   "Harrison & 17th St",
+  3:   "Conservatory of Flowers",
+  4:   "Arguello & Geary",
+  5:   "7th Ave & Cabrillo",
+  6:   "8th Ave & JFK",
+  7:   "Turk & Stanyan",
+  8:   "Parker & McAllister",
+  9:   "Fell & Stanyan",
+  10:  "Waller & Shrader",
+  11:  "Page & Masonic",
+  12:  "MLK & 7th Ave",
+  13:  "Frederick & Arguello",
+  14:  "5th Ave & Anza",
+  15:  "7th Ave & Clement",
+  255: "None",
+};
+
+interface LedColor { r: number; g: number; b: number; }
+interface StatusFrame {
+  batteryPct: number;
+  wifiConnected: boolean;
+  rssi: number;
+  fetchAgeSecs: number;
+  stationInput: number;
+  leds: LedColor[];
+}
+
+function parseStatusFrame(buf: Uint8Array): StatusFrame {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  return {
+    batteryPct:    buf[1],
+    wifiConnected: buf[2] === 1,
+    rssi:          view.getInt8(3),
+    fetchAgeSecs:  view.getUint32(4, true),
+    stationInput:  buf[8],
+    leds: Array.from({ length: 12 }, (_, i) => ({
+      r: buf[9 + i * 3],
+      g: buf[9 + i * 3 + 1],
+      b: buf[9 + i * 3 + 2],
+    })),
+  };
+}
+
+// ── Status DOM refs ───────────────────────────────────────────────────────────
+const statusConnectBtn    = document.getElementById("statusConnectBtn")    as HTMLButtonElement;
+const statusDisconnectBtn = document.getElementById("statusDisconnectBtn") as HTMLButtonElement;
+const statusConnLabel     = document.getElementById("statusConnLabel")!;
+const statusDisplay       = document.getElementById("statusDisplay")!;
+const statusBatteryVal    = document.getElementById("statusBatteryVal")!;
+const statusBatteryBar    = document.getElementById("statusBatteryBar")    as HTMLElement;
+const statusWifiDot       = document.getElementById("statusWifiDot")!;
+const statusWifiText      = document.getElementById("statusWifiText")!;
+const statusRssi          = document.getElementById("statusRssi")!;
+const statusFetchAge      = document.getElementById("statusFetchAge")!;
+const statusInput         = document.getElementById("statusInput")!;
+const statusLedsEl        = document.getElementById("statusLeds")!;
+
+// ── Status serial state ───────────────────────────────────────────────────────
+let statusDevice: SerialPort | null = null;
+let statusReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+// ── Frame framing: accumulator-based with checksum verification ───────────────
+//
+// We accumulate raw bytes in a flat array, then scan for 0xAB. Once we have
+// STATUS_FRAME_SIZE bytes starting with 0xAB, we verify the XOR checksum.
+// On failure we discard one byte and re-scan — this correctly handles any data
+// byte that happens to equal 0xAB (e.g. rssi == -85 dBm == 0xAB).
+let frameAccum: number[] = [];
+
+function resetFramer() { frameAccum = []; }
+
+function frameChecksumValid(buf: number[]): boolean {
+  const data = buf.slice(0, STATUS_FRAME_SIZE - 1);
+  const checksum = data.reduce((acc, b) => acc ^ b, 0);
+  return checksum === buf[STATUS_FRAME_SIZE - 1];
+}
+
+function processStatusBytes(bytes: Uint8Array) {
+  for (const b of bytes) frameAccum.push(b);
+
+  // Consume as many valid frames as possible from the front of the accumulator.
+  while (frameAccum.length >= STATUS_FRAME_SIZE) {
+    // Advance past any leading non-magic bytes.
+    if (frameAccum[0] !== STATUS_MAGIC) { frameAccum.shift(); continue; }
+
+    // We have a candidate frame. Verify checksum before accepting.
+    if (frameChecksumValid(frameAccum)) {
+      renderStatus(parseStatusFrame(new Uint8Array(frameAccum.slice(0, STATUS_FRAME_SIZE))));
+      frameAccum.splice(0, STATUS_FRAME_SIZE);
+    } else {
+      // False magic byte — discard it and keep scanning.
+      frameAccum.shift();
+    }
+  }
+}
+
+// ── LED grid initialisation (done once) ──────────────────────────────────────
+// Physical LED layout matches the hardware:
+//   Row 1 (top):    eBike  LEDs 0–5
+//   Row 2 (bottom): Mech   LEDs 11–6  (reversed)
+const LED_GRID_ORDER = [0, 1, 2, 3, 4, 5, 11, 10, 9, 8, 7, 6];
+
+function initLedGrid() {
+  statusLedsEl.innerHTML = "";
+  for (const ledIdx of LED_GRID_ORDER) {
+    const wrap = document.createElement("div");
+    const circle = document.createElement("div");
+    circle.className = "led-circle";
+    circle.id = `led-${ledIdx}`;
+    circle.style.backgroundColor = "rgb(20,20,20)";
+    const label = document.createElement("div");
+    label.className = "led-label";
+    label.textContent = String(ledIdx);
+    wrap.appendChild(circle);
+    wrap.appendChild(label);
+    statusLedsEl.appendChild(wrap);
+  }
+}
+
+initLedGrid();
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderStatus(frame: StatusFrame) {
+  statusDisplay.style.display = "";
+
+  // Battery
+  const pct = frame.batteryPct;
+  statusBatteryVal.textContent = `${pct}%`;
+  statusBatteryBar.style.width = `${pct}%`;
+  statusBatteryBar.style.background =
+    pct > 50 ? "var(--success)" : pct > 20 ? "#e3b341" : "var(--error)";
+
+  // WiFi
+  statusWifiDot.className  = "dot " + (frame.wifiConnected ? "connected" : "disconnected");
+  statusWifiText.textContent = frame.wifiConnected ? "Connected" : "Disconnected";
+  statusRssi.textContent   = frame.wifiConnected ? `${frame.rssi} dBm` : "--";
+
+  // GBFS fetch age
+  if (frame.fetchAgeSecs === 0xffffffff) {
+    statusFetchAge.textContent = "Never";
+  } else {
+    const s = frame.fetchAgeSecs;
+    statusFetchAge.textContent = s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ${s % 60}s ago`;
+  }
+
+  // Station input
+  statusInput.textContent =
+    STATION_NAMES[frame.stationInput] ?? `Unknown (${frame.stationInput})`;
+
+  // LEDs
+  for (let i = 0; i < 12; i++) {
+    const el = document.getElementById(`led-${i}`);
+    if (!el) continue;
+    const { r, g, b } = frame.leds[i];
+    const isOff = r === 0 && g === 0 && b === 0;
+    el.style.backgroundColor = isOff ? "rgb(20,20,20)" : `rgb(${r},${g},${b})`;
+    el.style.boxShadow = isOff ? "none" : `0 0 6px rgba(${r},${g},${b},0.6)`;
+  }
+}
+
+// ── Status serial read loop ───────────────────────────────────────────────────
+async function runStatusReadLoop(port: SerialPort) {
+  const reader = port.readable!.getReader();
+  statusReader = reader;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) processStatusBytes(value);
+    }
+  } catch {
+    // port closed / disconnected
+  } finally {
+    try { reader.releaseLock(); } catch { /* ignore */ }
+    statusReader = null;
+  }
+}
+
+async function releaseStatusPort() {
+  if (statusReader) {
+    try { await statusReader.cancel(); } catch { /* ignore */ }
+    try { statusReader.releaseLock(); }  catch { /* ignore */ }
+    statusReader = null;
+  }
+  if (statusDevice) {
+    try { await statusDevice.close(); } catch { /* ignore */ }
+    statusDevice = null;
+  }
+}
+
+// ── Status connect/disconnect ─────────────────────────────────────────────────
+statusConnectBtn.onclick = async () => {
+  if (!("serial" in navigator)) {
+    alert("Web Serial API is not supported. Use Chrome or Edge.");
+    return;
+  }
+  try {
+    await releaseStatusPort();
+    statusDevice = await navigator.serial.requestPort();
+    if (!statusDevice.readable) {
+      await statusDevice.open({ baudRate: 115200 });
+    }
+    resetFramer();
+
+    statusConnectBtn.style.display    = "none";
+    statusDisconnectBtn.style.display = "inline";
+    statusConnLabel.style.display     = "inline";
+    statusConnLabel.textContent       = "Streaming…";
+
+    runStatusReadLoop(statusDevice).then(() => {
+      // Loop exited (port closed)
+      statusConnectBtn.style.display    = "inline";
+      statusDisconnectBtn.style.display = "none";
+      statusConnLabel.style.display     = "none";
+    });
+  } catch (e) {
+    if ((e as Error).name !== "NotAllowedError")
+      alert("Could not open port: " + (e instanceof Error ? e.message : String(e)));
+  }
+};
+
+statusDisconnectBtn.onclick = async () => {
+  await releaseStatusPort();
+  statusConnectBtn.style.display    = "inline";
+  statusDisconnectBtn.style.display = "none";
+  statusConnLabel.style.display     = "none";
+  statusDisplay.style.display       = "none";
+  resetFramer();
+};
