@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bay Wheels Controller - Setup</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>Bay Wheels Controller</h1>
+        <p class="subtitle">Easy setup for your board</p>
+      </header>
+
+      <main>
+        <div class="wizard">
+          <div class="steps">
+            <div class="step" data-step="1">
+              <span class="step-num">1</span>
+              <span class="step-label">Flash firmware</span>
+            </div>
+            <div class="step" data-step="2">
+              <span class="step-num">2</span>
+              <span class="step-label">Configure WiFi</span>
+            </div>
+          </div>
+
+          <div class="panels">
+            <section class="panel active" id="panel-flash">
+              <h2>Step 1: Flash firmware</h2>
+              <p class="instruction">
+                Connect your ESP32-S3 board via USB. If this is your first time,
+                you'll need to flash the firmware.
+              </p>
+              <div class="firmware-source">
+                <label>
+                  <input type="radio" name="firmware" value="download" checked />
+                  Download from latest release
+                </label>
+                <label>
+                  <input type="radio" name="firmware" value="file" />
+                  I have a firmware file
+                </label>
+              </div>
+              <div class="file-input hidden" id="file-input">
+                <input type="file" id="firmware-file" accept=".bin" />
+              </div>
+              <div class="actions">
+                <button type="button" id="btn-flash" class="btn btn-primary">
+                  Connect & flash
+                </button>
+              </div>
+              <div class="progress hidden" id="flash-progress">
+                <div class="progress-bar"></div>
+                <span class="progress-text">Flashing...</span>
+              </div>
+              <div class="log" id="flash-log"></div>
+            </section>
+
+            <section class="panel" id="panel-wifi">
+              <h2>Step 2: Configure WiFi</h2>
+              <p class="instruction">
+                Hold the <strong>GPIO2 button</strong> on your board, then
+                connect via USB (or reset the board while holding the button).
+                Release the button when you see the provisioning prompt.
+              </p>
+              <div class="form">
+                <label>
+                  <span>WiFi network name (SSID)</span>
+                  <input type="text" id="wifi-ssid" placeholder="Your WiFi name" />
+                </label>
+                <label>
+                  <span>WiFi password</span>
+                  <input
+                    type="password"
+                    id="wifi-password"
+                    placeholder="Your WiFi password"
+                  />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="button" id="btn-provision" class="btn btn-primary">
+                  Connect & configure
+                </button>
+              </div>
+              <div class="log" id="wifi-log"></div>
+            </section>
+          </div>
+        </div>
+
+        <div class="browser-note">
+          <strong>Browser support:</strong> Chrome or Edge (desktop) required.
+          Web Serial API is not supported in Safari or Firefox.
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

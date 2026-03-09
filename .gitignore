@@ -27,3 +27,7 @@ target/
 
 # Ignore .DS_Store file in mac
 **/.DS_Store
+
+# Web setup app
+web/node_modules/
+web/dist/
