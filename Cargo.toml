@@ -66,6 +66,8 @@ int-enum = "1.2.0"
 embassy-sync = "0.7.2"
 strum = { version = "0.27.2", default-features = false }
 strum_macros = "0.27.2"
+esp-storage = { version = "0.8", features = ["esp32s3"] }
+esp-nvs = { version = "0.1", features = ["esp32s3"] }
 
 
 [profile.dev]
@@ -83,3 +85,10 @@ incremental      = false
 lto              = 'fat'
 opt-level        = 's'
 overflow-checks  = false
+
+
+[lints.clippy]
+# Treat usage of unwrap() as a warning
+unwrap_used = "warn" 
+# Treat usage of expect() as a warning
+expect_used = "warn" 

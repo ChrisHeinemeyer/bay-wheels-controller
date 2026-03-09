@@ -10,13 +10,15 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use alloc::string::String;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
-use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup};
+use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup, usb_serial_jtag::UsbSerialJtag};
+use esp_storage::FlashStorage;
 use rtt_target::rprintln;
 
 use esp32_embasssy_wifi_test::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
-use esp32_embasssy_wifi_test::{network, spi_devices, wifi};
+use esp32_embasssy_wifi_test::{network, provisioning, spi_devices, wifi, wifi_config};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -24,6 +26,28 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
+}
+
+/// Check if the provisioning button (GPIO2) is pressed
+fn is_provisioning_button_pressed(button: &gpio::Input<'_>) -> bool {
+    // Button is active low (pressed = low)
+    button.is_low()
+}
+
+/// Get WiFi credentials from NVS
+/// Returns None if no credentials are stored - user must run provisioning first
+fn get_wifi_credentials(flash: FlashStorage<'static>) -> Option<(String, String)> {
+    match wifi_config::load_credentials(flash) {
+        Ok(creds) => {
+            rprintln!("Using WiFi credentials from NVS");
+            Some((creds.ssid, creds.password))
+        }
+        Err(_) => {
+            rprintln!("No WiFi credentials found in NVS");
+            rprintln!("Hold GPIO2 button during boot to enter provisioning mode");
+            None
+        }
+    }
 }
 
 #[allow(
@@ -43,6 +67,27 @@ async fn main(spawner: Spawner) -> ! {
     // Setup heap allocator
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65536);
 
+    // Check provisioning button (GPIO2) before initializing Embassy
+    let provision_button = gpio::Input::new(
+        peripherals.GPIO2,
+        gpio::InputConfig::default().with_pull(gpio::Pull::Up),
+    );
+
+    if is_provisioning_button_pressed(&provision_button) {
+        rprintln!("Provisioning button pressed - entering WiFi setup mode");
+
+        // Initialize USB-Serial-JTAG for provisioning
+        let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE);
+        let flash = FlashStorage::new(peripherals.FLASH);
+
+        // Run provisioning (this will reboot when done)
+        provisioning::run_provisioning(usb_serial, flash);
+        // Never returns - reboots after provisioning
+    }
+
+    // Drop the button input so GPIO2 can be used elsewhere if needed
+    drop(provision_button);
+
     // Initialize Embassy executor
     let timg0 = TimerGroup::new(peripherals.TIMG1);
     esp_rtos::start(timg0.timer0);
@@ -55,13 +100,25 @@ async fn main(spawner: Spawner) -> ! {
         esp_radio::wifi::new(radio_init, peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
 
-    // WiFi credentials
-    static SSID: &str = env!("SSID");
-    static PASSWORD: &str = env!("PASSWORD");
+    // Get WiFi credentials from NVS
+    let flash = FlashStorage::new(peripherals.FLASH);
+    let creds = get_wifi_credentials(flash);
+
+    // If no credentials, panic with instructions (can't re-enter provisioning here
+    // since we've already consumed FLASH - user must reboot with button held)
+    let (ssid, password) = creds.unwrap_or_else(|| {
+        rprintln!("===========================================");
+        rprintln!("No WiFi credentials configured!");
+        rprintln!("Reboot while holding GPIO2 button to provision.");
+        rprintln!("===========================================");
+        panic!("No WiFi credentials");
+    });
+    let ssid: &'static str = Box::leak(ssid.into_boxed_str());
+    let password: &'static str = Box::leak(password.into_boxed_str());
 
     // Spawn WiFi connection task
     spawner
-        .spawn(wifi_connect::wifi_connect_task(controller, SSID, PASSWORD))
+        .spawn(wifi_connect::wifi_connect_task(controller, ssid, password))
         .expect("Failed to spawn wifi_connect_task");
 
     // Setup embassy-net stack for networking

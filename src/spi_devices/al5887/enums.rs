@@ -10,7 +10,7 @@ pub enum ColorChannel {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, IntEnum, EnumIter)]
+#[derive(Copy, Clone, IntEnum, EnumIter, Debug)]
 pub enum Led {
     Led0 = 0,
     Led1 = 1,
@@ -26,7 +26,7 @@ pub enum Led {
     Led11 = 11,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Color {
     pub r: u8,
     pub g: u8,

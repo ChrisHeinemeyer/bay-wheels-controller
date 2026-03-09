@@ -76,13 +76,28 @@ fn get_leds(
                 station.num_ebikes_available,
                 MECHANICAL_BIKE_LEDS.len() as u32,
             ) {
-                leds.push((EBIKE_LEDS[led as usize], EBIKE_COLOR));
+                let ebike_res = leds.push((EBIKE_LEDS[led as usize], EBIKE_COLOR));
+                let _ = match ebike_res {
+                    Ok(()) => true,
+                    Err(e) => {
+                        rprintln!("Error pushing ebike led: {:?}", e);
+                        false
+                    }
+                };
             }
             for led in 0..min(
                 station.num_bikes_available,
                 MECHANICAL_BIKE_LEDS.len() as u32,
             ) {
-                leds.push((MECHANICAL_BIKE_LEDS[led as usize], MECHANICAL_BIKE_COLOR));
+                let mech_res =
+                    leds.push((MECHANICAL_BIKE_LEDS[led as usize], MECHANICAL_BIKE_COLOR));
+                let _ = match mech_res {
+                    Ok(()) => true,
+                    Err(e) => {
+                        rprintln!("Error pushing mech bike led: {:?}", e);
+                        false
+                    }
+                };
             }
         }
     }
