@@ -82,8 +82,7 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
           "Firmware flashed! Unplug the device, plug it back in, then click Connect.";
       } else {
         wifiInstructionsText.innerHTML =
-          "Hold the <strong>GPIO2</strong> button while power cycling your board " +
-          "to enter WiFi setup mode, then click Connect.";
+          "You must flash before changing wifi credentials if they have already been set.";
       }
       wifiInstructions.style.display = "block";
       wifiConnectBtn.style.display = "inline-block";
