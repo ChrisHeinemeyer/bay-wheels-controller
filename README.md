@@ -24,11 +24,13 @@ Pre-built firmware is available on [Releases](https://github.com/ChrisHeinemeyer
 
 ## Git hooks
 
-Pre-commit runs `cargo fmt`; pre-push runs `cargo run`. Install once:
+Pre-commit runs `cargo fmt` and Prettier on staged files; pre-push runs `cargo build --release` when `src/` changes. Install once:
 
 ```bash
 ./scripts/setup-hooks.sh
 ```
+
+Requires `npm install` at repo root for Prettier/lint-staged.
 
 ## Building from source
 

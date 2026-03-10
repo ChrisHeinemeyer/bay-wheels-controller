@@ -32,3 +32,5 @@ target/
 # Web setup app
 web/node_modules/
 web/dist/
+tools/node_modules/
+node_modules/

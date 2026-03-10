@@ -1,22 +1,28 @@
 /* ── Reset & base ─────────────────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 :root {
-  --bg:        #0f172a;
-  --bg2:       #1e293b;
-  --bg3:       #334155;
-  --border:    #475569;
-  --text:      #e2e8f0;
-  --text-dim:  #94a3b8;
-  --accent:    #38bdf8;
-  --ok:        #34d399;
-  --warn:      #fbbf24;
-  --err:       #f87171;
-  --mapped:    #34d399;
-  --current:   #fbbf24;
+  --bg: #0f172a;
+  --bg2: #1e293b;
+  --bg3: #334155;
+  --border: #475569;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --accent: #38bdf8;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --err: #f87171;
+  --mapped: #34d399;
+  --current: #fbbf24;
 
-  --font: 'Inter', system-ui, -apple-system, sans-serif;
-  --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font: "Inter", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", "Fira Code", monospace;
 
   font-size: 14px;
   color: var(--text);
@@ -24,7 +30,11 @@
   font-family: var(--font);
 }
 
-html, body, #app { height: 100%; }
+html,
+body,
+#app {
+  height: 100%;
+}
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #app {
@@ -126,8 +136,13 @@ header h1 {
   animation: pulse 1.5s ease-in-out infinite;
 }
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.55; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .action-row {
@@ -165,7 +180,10 @@ header h1 {
   line-height: 1.5;
 }
 
-.log-entry { border-bottom: 1px solid #1e293b; padding: 1px 0; }
+.log-entry {
+  border-bottom: 1px solid #1e293b;
+  padding: 1px 0;
+}
 
 /* Mappings list */
 #mappings-wrap {
@@ -257,7 +275,10 @@ button {
   font-size: 0.78rem;
   font-family: var(--font);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    opacity 0.15s;
   white-space: nowrap;
 }
 
@@ -276,19 +297,25 @@ button.btn-primary {
   border-color: var(--accent);
   color: #fff;
 }
-button.btn-primary:hover:not(:disabled) { background: #0284c7; }
+button.btn-primary:hover:not(:disabled) {
+  background: #0284c7;
+}
 
 button.btn-danger {
   background: #7f1d1d;
   border-color: var(--err);
 }
-button.btn-danger:hover:not(:disabled) { background: #991b1b; }
+button.btn-danger:hover:not(:disabled) {
+  background: #991b1b;
+}
 
 button.btn-warn {
   background: #78350f;
   border-color: var(--warn);
 }
-button.btn-warn:hover:not(:disabled) { background: #92400e; }
+button.btn-warn:hover:not(:disabled) {
+  background: #92400e;
+}
 
 /* ── Badges ──────────────────────────────────────────────────────────── */
 .badge {
@@ -301,9 +328,21 @@ button.btn-warn:hover:not(:disabled) { background: #92400e; }
   white-space: nowrap;
 }
 
-.badge--ok    { color: var(--ok);   border-color: var(--ok);   background: #052e16; }
-.badge--warn  { color: var(--warn); border-color: var(--warn); background: #2d1a00; }
-.badge--error { color: var(--err);  border-color: var(--err);  background: #2d0a0a; }
+.badge--ok {
+  color: var(--ok);
+  border-color: var(--ok);
+  background: #052e16;
+}
+.badge--warn {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: #2d1a00;
+}
+.badge--error {
+  color: var(--err);
+  border-color: var(--err);
+  background: #2d0a0a;
+}
 
 /* ── Leaflet overrides ───────────────────────────────────────────────── */
 .leaflet-tooltip {
@@ -312,13 +351,24 @@ button.btn-warn:hover:not(:disabled) { background: #92400e; }
   color: var(--text) !important;
   font-family: var(--font) !important;
   font-size: 0.78rem !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,.5) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
 }
-.leaflet-tooltip::before { border-top-color: var(--border) !important; }
+.leaflet-tooltip::before {
+  border-top-color: var(--border) !important;
+}
 
-.leaflet-control-attribution { display: none; }
+.leaflet-control-attribution {
+  display: none;
+}
 
 /* ── Scrollbars ──────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg3);
+  border-radius: 3px;
+}

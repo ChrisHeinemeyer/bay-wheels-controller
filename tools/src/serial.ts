@@ -14,7 +14,7 @@
 // | 12     | 36   | led_rgb — 12 × (r, g, b)                       |
 // | 48     |  1   | XOR checksum of bytes 0–47                     |
 
-const MAGIC      = 0xAB;
+const MAGIC = 0xab;
 const FRAME_SIZE = 49;
 
 /** Parsed subset of the status frame relevant to the board-mapper tool. */
@@ -33,7 +33,7 @@ export class SerialConnection {
   private rxBuf: number[] = [];
 
   static isSupported(): boolean {
-    return 'serial' in navigator;
+    return "serial" in navigator;
   }
 
   async connect(baudRate = 115200): Promise<void> {
@@ -45,7 +45,9 @@ export class SerialConnection {
 
   private async readLoop(signal: AbortSignal): Promise<void> {
     if (!this.port?.readable) return;
-    const reader = (this.port.readable as ReadableStream<Uint8Array>).getReader();
+    const reader = (
+      this.port.readable as ReadableStream<Uint8Array>
+    ).getReader();
     try {
       while (!signal.aborted) {
         const { value, done } = await reader.read();
@@ -94,7 +96,11 @@ export class SerialConnection {
   async disconnect(): Promise<void> {
     this.abortController?.abort();
     this.abortController = null;
-    try { await this.port?.close(); } catch { /* ignore */ }
+    try {
+      await this.port?.close();
+    } catch {
+      /* ignore */
+    }
     this.port = null;
     this.rxBuf = [];
   }
@@ -123,7 +129,7 @@ function parseFrame(frame: number[]): StatusFrame {
  * 0xFFFF means idle (no button pressed).
  */
 export function isSinglePress(raw: number): boolean {
-  const active = (~raw) & 0xFFFF;
+  const active = ~raw & 0xffff;
   return active !== 0 && (active & (active - 1)) === 0;
 }
 
@@ -135,6 +141,6 @@ export function isSinglePress(raw: number): boolean {
  * of the u16 (the first bit shifted out).
  */
 export function bitPosition(raw: number): number {
-  const active = (~raw) & 0xFFFF;
+  const active = ~raw & 0xffff;
   return 15 - Math.clz32(active);
 }

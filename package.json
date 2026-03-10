@@ -1,0 +1,11 @@
+{
+  "name": "bay-wheels-controller",
+  "private": true,
+  "devDependencies": {
+    "lint-staged": "^15.4.3",
+    "prettier": "^3.4.2"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx,css,html,json}": "prettier --write"
+  }
+}

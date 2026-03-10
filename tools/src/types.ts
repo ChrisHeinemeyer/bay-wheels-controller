@@ -44,7 +44,9 @@ declare global {
   }
 
   interface Serial extends EventTarget {
-    requestPort(options?: { filters?: SerialPortFilter[] }): Promise<SerialPort>;
+    requestPort(options?: {
+      filters?: SerialPortFilter[];
+    }): Promise<SerialPort>;
     getPorts(): Promise<SerialPort[]>;
   }
 
@@ -59,8 +61,8 @@ declare global {
     baudRate: number;
     dataBits?: number;
     stopBits?: number;
-    parity?: 'none' | 'even' | 'odd';
+    parity?: "none" | "even" | "odd";
     bufferSize?: number;
-    flowControl?: 'none' | 'hardware';
+    flowControl?: "none" | "hardware";
   }
 }

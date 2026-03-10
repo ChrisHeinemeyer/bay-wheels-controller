@@ -4,28 +4,46 @@
  * @returns `onActivate` — call this whenever the WiFi tab becomes visible.
  */
 export function initWifiTab(isJustFlashed: () => boolean): () => void {
-  const wifiInstructions     = document.getElementById("wifiInstructions")!;
+  const wifiInstructions = document.getElementById("wifiInstructions")!;
   const wifiInstructionsText = document.getElementById("wifiInstructionsText")!;
-  const wifiConnectBtn       = document.getElementById("wifiConnectBtn")       as HTMLButtonElement;
-  const ssidInput            = document.getElementById("ssidInput")            as HTMLInputElement;
-  const passwordInput        = document.getElementById("passwordInput")        as HTMLInputElement;
-  const wifiConfigBtn        = document.getElementById("wifiConfigBtn")        as HTMLButtonElement;
-  const wifiStatus           = document.getElementById("wifiStatus")!;
-  const wifiSpinner          = document.getElementById("wifiSpinner")!;
-  const wifiStatusIcon       = document.getElementById("wifiStatusIcon")!;
-  const wifiStatusText       = document.getElementById("wifiStatusText")!;
+  const wifiConnectBtn = document.getElementById(
+    "wifiConnectBtn",
+  ) as HTMLButtonElement;
+  const ssidInput = document.getElementById("ssidInput") as HTMLInputElement;
+  const passwordInput = document.getElementById(
+    "passwordInput",
+  ) as HTMLInputElement;
+  const wifiConfigBtn = document.getElementById(
+    "wifiConfigBtn",
+  ) as HTMLButtonElement;
+  const wifiStatus = document.getElementById("wifiStatus")!;
+  const wifiSpinner = document.getElementById("wifiSpinner")!;
+  const wifiStatusIcon = document.getElementById("wifiStatusIcon")!;
+  const wifiStatusText = document.getElementById("wifiStatusText")!;
 
-  let device:       SerialPort | null = null;
+  let device: SerialPort | null = null;
   let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   async function releasePort() {
     if (activeReader) {
-      try { await activeReader.cancel(); } catch { /* ignore */ }
-      try { activeReader.releaseLock(); }  catch { /* ignore */ }
+      try {
+        await activeReader.cancel();
+      } catch {
+        /* ignore */
+      }
+      try {
+        activeReader.releaseLock();
+      } catch {
+        /* ignore */
+      }
       activeReader = null;
     }
     if (device) {
-      try { await device.close(); } catch { /* ignore */ }
+      try {
+        await device.close();
+      } catch {
+        /* ignore */
+      }
       device = null;
     }
   }
@@ -34,21 +52,22 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
   type WifiStatusState = "idle" | "working" | "success" | "error";
 
   function setWifiStatus(state: WifiStatusState, message = "") {
-    wifiStatus.style.display     = state === "idle" ? "none" : "flex";
-    wifiSpinner.style.display    = state === "working" ? "inline-block" : "none";
-    wifiStatusIcon.style.display = state === "success" || state === "error" ? "inline" : "none";
-    wifiStatusText.textContent   = message;
+    wifiStatus.style.display = state === "idle" ? "none" : "flex";
+    wifiSpinner.style.display = state === "working" ? "inline-block" : "none";
+    wifiStatusIcon.style.display =
+      state === "success" || state === "error" ? "inline" : "none";
+    wifiStatusText.textContent = message;
 
-    wifiConfigBtn.disabled  = state === "working";
-    ssidInput.disabled      = state === "working";
-    passwordInput.disabled  = state === "working";
+    wifiConfigBtn.disabled = state === "working";
+    ssidInput.disabled = state === "working";
+    passwordInput.disabled = state === "working";
 
     if (state === "success") {
       wifiStatusIcon.textContent = "✓";
-      wifiStatusIcon.className   = "status-icon success";
+      wifiStatusIcon.className = "status-icon success";
     } else if (state === "error") {
       wifiStatusIcon.textContent = "✗";
-      wifiStatusIcon.className   = "status-icon error";
+      wifiStatusIcon.className = "status-icon error";
     } else {
       wifiStatusIcon.className = "status-icon";
     }
@@ -67,7 +86,7 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
           "to enter WiFi setup mode, then click Connect.";
       }
       wifiInstructions.style.display = "block";
-      wifiConnectBtn.style.display   = "inline-block";
+      wifiConnectBtn.style.display = "inline-block";
     } else {
       wifiInstructions.style.display = "none";
     }
@@ -84,15 +103,24 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
       wifiInstructions.style.display = "none";
     } catch (e) {
       if ((e as Error).name !== "NotAllowedError")
-        alert("Could not open port: " + (e instanceof Error ? e.message : String(e)));
+        alert(
+          "Could not open port: " +
+            (e instanceof Error ? e.message : String(e)),
+        );
     }
   };
 
   // ── Configure button ──────────────────────────────────────────────────────────
   wifiConfigBtn.onclick = async () => {
     const ssid = ssidInput.value.trim();
-    if (!ssid) { ssidInput.focus(); return; }
-    if (!device) { alert("Connect to your device first."); return; }
+    if (!ssid) {
+      ssidInput.focus();
+      return;
+    }
+    if (!device) {
+      alert("Connect to your device first.");
+      return;
+    }
 
     setWifiStatus("working", "Connecting...");
     try {
@@ -104,10 +132,10 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
         ssid,
         passwordInput.value,
         (msg, done, isError) => {
-          if (done)         setWifiStatus("success", msg);
-          else if (isError) setWifiStatus("error",   msg);
-          else              setWifiStatus("working",  msg);
-        }
+          if (done) setWifiStatus("success", msg);
+          else if (isError) setWifiStatus("error", msg);
+          else setWifiStatus("working", msg);
+        },
       );
     } catch (e) {
       setWifiStatus("error", e instanceof Error ? e.message : String(e));
@@ -117,7 +145,7 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
   };
 
   // Submit on Enter from either credential field
-  [ssidInput, passwordInput].forEach(input => {
+  [ssidInput, passwordInput].forEach((input) => {
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") wifiConfigBtn.click();
     });
@@ -132,7 +160,7 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
     port: SerialPort,
     ssid: string,
     password: string,
-    onStatus: (msg: string, done?: boolean, error?: boolean) => void
+    onStatus: (msg: string, done?: boolean, error?: boolean) => void,
   ): Promise<void> {
     const dec = new TextDecoder();
     const enc = new TextEncoder();
@@ -145,8 +173,11 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
       const writer = port.writable!.getWriter();
       // Firmware's drain_newline() reads one extra byte after \r or \n.
       // Send \r\n so drain_newline consumes the \n and doesn't block.
-      try { await writer.write(enc.encode(text + "\r\n")); }
-      finally { writer.releaseLock(); }
+      try {
+        await writer.write(enc.encode(text + "\r\n"));
+      } finally {
+        writer.releaseLock();
+      }
     }
 
     async function ensureOpen() {
@@ -175,8 +206,11 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
           // Race the read against a 5 s timeout so we don't block forever
           const raceResult = await Promise.race([
             reader.read() as Promise<ReadableStreamReadResult<Uint8Array>>,
-            new Promise<ReadableStreamReadResult<Uint8Array>>(resolve =>
-              setTimeout(() => resolve({ value: new Uint8Array(0), done: false }), 5_000)
+            new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) =>
+              setTimeout(
+                () => resolve({ value: new Uint8Array(0), done: false }),
+                5_000,
+              ),
             ),
           ]);
           if (raceResult.done) {
@@ -188,13 +222,23 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
             const chunk = dec.decode(value);
             provLog(`← rx (${value.length}B): ${JSON.stringify(chunk)}`);
           } else {
-            provLog(`← timeout tick (state=${state}, buf=${JSON.stringify(buf.slice(-80))})`);
+            provLog(
+              `← timeout tick (state=${state}, buf=${JSON.stringify(buf.slice(-80))})`,
+            );
           }
         } catch (err) {
           provLog(`read error: ${err} — assuming mid-reboot disconnect`);
-          try { reader.releaseLock(); } catch { /* empty */ }
+          try {
+            reader.releaseLock();
+          } catch {
+            /* empty */
+          }
           onStatus("Device rebooting, waiting...");
-          try { await port.close(); } catch { /* empty */ }
+          try {
+            await port.close();
+          } catch {
+            /* empty */
+          }
           provLog("sleeping 3 s before reopen...");
           await sleep(3_000);
           provLog("attempting reopen...");
@@ -213,7 +257,8 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
             provLog("matched 'Enter WiFi SSID:' → sending SSID, moving to pwd");
             onStatus("Sending SSID...");
             await send(ssid);
-            state = "pwd"; buf = "";
+            state = "pwd";
+            buf = "";
           }
         } else if (state === "pwd") {
           if (buf.includes("Enter WiFi SSID:")) {
@@ -222,17 +267,23 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
             await send(ssid);
             buf = "";
           } else if (buf.includes("Enter WiFi Password:")) {
-            provLog("matched 'Enter WiFi Password:' → sending password, moving to confirm");
+            provLog(
+              "matched 'Enter WiFi Password:' → sending password, moving to confirm",
+            );
             onStatus("Sending password...");
             await send(password);
-            state = "confirm"; buf = "";
+            state = "confirm";
+            buf = "";
           }
         } else if (state === "confirm") {
           if (buf.includes("Save credentials?")) {
-            provLog("matched 'Save credentials?' → sending y, moving to result");
+            provLog(
+              "matched 'Save credentials?' → sending y, moving to result",
+            );
             onStatus("Saving...");
             await send("y");
-            state = "result"; buf = "";
+            state = "result";
+            buf = "";
           }
         } else if (state === "result") {
           if (buf.includes("Credentials saved successfully!")) {
@@ -241,16 +292,23 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
             return;
           }
           if (buf.includes("Error saving credentials")) {
-            provLog("matched 'Error saving credentials' → waiting for reboot + re-prompt");
+            provLog(
+              "matched 'Error saving credentials' → waiting for reboot + re-prompt",
+            );
             onStatus("Rebooting to retry, please wait...");
-            state = "ssid"; buf = "";
+            state = "ssid";
+            buf = "";
           }
         }
       }
       provLog("timed out after 2 minutes");
       throw new Error("Configuration timed out after 2 minutes");
     } finally {
-      try { reader.releaseLock(); } catch { /* empty */ }
+      try {
+        reader.releaseLock();
+      } catch {
+        /* empty */
+      }
       activeReader = null;
       provLog("reader released");
     }
@@ -259,4 +317,6 @@ export function initWifiTab(isJustFlashed: () => boolean): () => void {
   return onActivate;
 }
 
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}

@@ -1,12 +1,12 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from "vite";
 
 export default defineConfig({
   server: {
     proxy: {
-      '/gbfs-proxy': {
-        target: 'https://gbfs.lyft.com',
+      "/gbfs-proxy": {
+        target: "https://gbfs.lyft.com",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/gbfs-proxy/, ''),
+        rewrite: (path) => path.replace(/^\/gbfs-proxy/, ""),
       },
     },
   },

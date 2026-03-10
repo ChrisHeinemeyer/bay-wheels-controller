@@ -3,10 +3,10 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
-  contents: write  # Required to create releases and upload assets
+  contents: write # Required to create releases and upload assets
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
         uses: esp-rs/xtensa-toolchain@v1.6
         with:
           default: true
-          version: '1.88.0.0'
+          version: "1.88.0.0"
           buildtargets: esp32s3
 
       - name: Install cargo-espflash

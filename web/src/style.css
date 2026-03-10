@@ -73,11 +73,15 @@ header h1 {
   cursor: pointer;
   border-radius: var(--radius) var(--radius) 0 0;
   border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
   margin-bottom: -1px;
 }
 
-.tab:hover { color: var(--text); }
+.tab:hover {
+  color: var(--text);
+}
 
 .tab.active {
   color: var(--accent);
@@ -93,13 +97,15 @@ header h1 {
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.card h2, section h2 {
+.card h2,
+section h2 {
   margin: 0 0 1rem;
   font-size: 1rem;
   font-weight: 600;
 }
 
-.console-card { }
+.console-card {
+}
 
 section {
   background: var(--surface);
@@ -119,8 +125,12 @@ section {
   font-size: 0.9rem;
 }
 
-.instructions p { margin: 0 0 0.75rem; }
-.instructions p:last-of-type { margin-bottom: 0; }
+.instructions p {
+  margin: 0 0 0.75rem;
+}
+.instructions p:last-of-type {
+  margin-bottom: 0;
+}
 
 .field-group {
   display: flex;
@@ -160,7 +170,11 @@ section {
   font-size: 0.9rem;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .spinner {
   display: inline-block;
@@ -178,8 +192,12 @@ section {
   flex-shrink: 0;
 }
 
-.status-icon.success { color: var(--success); }
-.status-icon.error   { color: var(--error); }
+.status-icon.success {
+  color: var(--success);
+}
+.status-icon.error {
+  color: var(--error);
+}
 
 .connect-row {
   display: flex;
@@ -278,15 +296,125 @@ section {
 }
 
 /* ── Status tab ── */
-.status-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-bottom: 1rem;
+#main.status-active {
+  max-width: 1200px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0.75rem 1rem;
 }
 
-@media (max-width: 480px) {
-  .status-grid { grid-template-columns: 1fr; }
+#main.status-active header {
+  margin-bottom: 0.5rem;
+}
+
+#main.status-active header h1 {
+  font-size: 1.1rem;
+}
+
+#main.status-active .tabs {
+  margin-bottom: 0.5rem;
+}
+
+#main.status-active .tab {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+#statusTab {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#statusTab .card:first-child {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 1rem;
+}
+
+#statusTab .connect-row {
+  margin-bottom: 0.25rem;
+}
+
+#statusTab .connect-row + p {
+  font-size: 0.75rem;
+}
+
+#statusDisplay {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0.5rem 1rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  transition:
+    opacity 0.2s,
+    filter 0.2s;
+}
+
+#statusDisplay.status-disconnected {
+  opacity: 0.5;
+  filter: grayscale(0.6);
+  pointer-events: none;
+}
+
+.status-map-wrap {
+  grid-row: 1 / -1;
+  position: relative;
+  min-height: 280px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.status-map-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.status-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.status-metric {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.status-metric-label {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-bottom: 0.1rem;
+}
+
+.status-metric-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.status-metric .battery-track {
+  height: 4px;
+  margin-top: 0.2rem;
+}
+
+.status-metric .metric-row {
+  font-size: 0.8rem;
+}
+
+.status-metric .dot {
+  width: 6px;
+  height: 6px;
 }
 
 .metric-value {
@@ -309,8 +437,12 @@ section {
   flex-shrink: 0;
 }
 
-.dot.connected { background: var(--success); }
-.dot.disconnected { background: var(--error); }
+.dot.connected {
+  background: var(--success);
+}
+.dot.disconnected {
+  background: var(--error);
+}
 
 .battery-track {
   width: 100%;
@@ -324,14 +456,16 @@ section {
   height: 100%;
   border-radius: 3px;
   background: var(--success);
-  transition: width 0.4s, background 0.4s;
+  transition:
+    width 0.4s,
+    background 0.4s;
   width: 0%;
 }
 
 .led-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .led-circle {
@@ -343,16 +477,12 @@ section {
 }
 
 .led-label {
-  font-size: 0.6rem;
+  font-size: 0.55rem;
   color: var(--text-muted);
   text-align: center;
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 
-/* ── Map tab ── */
-.map-container {
-  height: 420px;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--bg);
+#statusDisplay .led-grid {
+  max-width: 240px;
 }
