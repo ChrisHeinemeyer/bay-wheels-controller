@@ -52,9 +52,9 @@ fn load_env_file() {
 
 /// Parses `src/stations.rs` and emits `web/src/generated/station-ids.ts`.
 ///
-/// The generated file exports a `STATION_IDS` array where each index matches
-/// the corresponding `StationIdx` ordinal so that the web UI can look up the
-/// GBFS station name without duplicating the UUID list.
+/// The generated file exports a `STATION_IDS` map from StationIdx enum variant
+/// name to GBFS station UUID, so the web UI can look up station names without
+/// duplicating the UUID list.
 fn generate_station_ids_ts() {
     println!("cargo:rerun-if-changed=src/stations.rs");
 
@@ -62,7 +62,7 @@ fn generate_station_ids_ts() {
         .expect("build.rs: could not read src/stations.rs");
 
     // Locate the slice literal that follows TARGET_STATIONS: find `= &[` then
-    // the matching `]` and extract all quoted string literals within that range.
+    // the matching `]` and extract (uuid, StationIdx::Variant) tuples.
     let array_start = src
         .find("TARGET_STATIONS")
         .and_then(|p| src[p..].find("= &[").map(|q| p + q + 4))
@@ -90,22 +90,31 @@ fn generate_station_ids_ts() {
     }
     let array_body = &array_src[..array_end];
 
-    // Extract every quoted string literal from the array body in order.
-    // Each tuple entry is ("uuid", StationIdx::Variant); we accept anything
-    // that looks like a UUID (contains '-') or a pure-numeric GBFS station ID.
-    let mut ids: Vec<String> = Vec::new();
+    // Extract (uuid, variant_name) from each tuple ("uuid", StationIdx::Variant).
+    let mut entries: Vec<(String, String)> = Vec::new();
     let mut i = 0;
     let bytes = array_body.as_bytes();
     while i < bytes.len() {
+        // Look for "uuid" string
         if bytes[i] == b'"' {
             let start = i + 1;
             let mut end = start;
             while end < bytes.len() && bytes[end] != b'"' {
                 end += 1;
             }
-            let s = &array_body[start..end];
-            if s.len() > 8 && (s.contains('-') || s.chars().all(|c| c.is_ascii_digit())) {
-                ids.push(s.to_string());
+            let uuid = &array_body[start..end];
+            if uuid.len() > 8 && (uuid.contains('-') || uuid.chars().all(|c| c.is_ascii_digit())) {
+                // Look for StationIdx::VariantName after this uuid (skip to next tuple element)
+                let rest = &array_body[end + 1..];
+                if let Some(idx) = rest.find("StationIdx::") {
+                    let variant_start = idx + "StationIdx::".len();
+                    let variant_rest = &rest[variant_start..];
+                    let variant_end = variant_rest
+                        .find(|c: char| !c.is_alphanumeric() && c != '_')
+                        .unwrap_or(variant_rest.len());
+                    let variant = &variant_rest[..variant_end];
+                    entries.push((variant.to_string(), uuid.to_string()));
+                }
             }
             i = end + 1;
         } else {
@@ -118,13 +127,13 @@ fn generate_station_ids_ts() {
 
     let mut ts = String::new();
     ts.push_str("// Generated from src/stations.rs by build.rs — do not edit manually.\n");
-    ts.push_str("// Each array index matches the corresponding StationIdx ordinal.\n");
-    ts.push_str("// StationIdx::None = 255 has no entry; check for that before indexing.\n");
-    ts.push_str("export const STATION_IDS: string[] = [\n");
-    for id in &ids {
-        ts.push_str(&format!("  \"{id}\",\n"));
+    ts.push_str("// Map from StationIdx ordinal to GBFS station UUID.\n");
+    ts.push_str("// StationIdx::None and StationIdx::Unknown have no entries.\n");
+    ts.push_str("export const STATION_IDS: Record<number, string> = {\n");
+    for (i, (_, uuid)) in entries.iter().enumerate() {
+        ts.push_str(&format!("  {i}: \"{uuid}\",\n"));
     }
-    ts.push_str("];\n");
+    ts.push_str("};\n");
 
     let out_path = format!("{out_dir}/station-ids.ts");
     // Only write if content changed to avoid spurious Vite rebuilds.

@@ -348,3 +348,11 @@ section {
   text-align: center;
   margin-top: 0.15rem;
 }
+
+/* ── Map tab ── */
+.map-container {
+  height: 420px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg);
+}

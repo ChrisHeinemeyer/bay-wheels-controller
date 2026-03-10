@@ -19,6 +19,7 @@
         <button class="tab active" data-tab="flash">1 · Flash</button>
         <button class="tab" data-tab="wifi">2 · WiFi Setup</button>
         <button class="tab" data-tab="status">3 · Status</button>
+        <button class="tab" data-tab="map">4 · Map</button>
       </nav>
 
       <!-- Tab 1: Flash -->
@@ -133,6 +134,22 @@
             <div class="led-grid" id="statusLeds"></div>
           </section>
         </div>
+      </div>
+
+      <!-- Tab 4: Map -->
+      <div id="mapTab" style="display: none;">
+        <section class="card">
+          <div class="connect-row">
+            <button type="button" id="mapConnectBtn" class="btn btn-primary">Connect</button>
+            <button type="button" id="mapDisconnectBtn" class="btn" style="display: none;">Disconnect</button>
+            <span id="mapConnLabel" style="display: none; color: var(--text-muted); font-size: 0.85rem;"></span>
+            <span id="mapStatus" style="color: var(--text-muted); font-size: 0.85rem;">—</span>
+          </div>
+          <p style="margin: 0; font-size: 0.85rem; color: var(--text-muted);">
+            Connect to the device and press station buttons — the map highlights the active station.
+          </p>
+        </section>
+        <div id="mapContainer" class="map-container"></div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

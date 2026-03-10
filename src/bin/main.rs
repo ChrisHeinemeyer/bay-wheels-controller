@@ -110,8 +110,7 @@ async fn main(spawner: Spawner) -> ! {
                     // SAFETY: The FlashStorage created above has been dropped.
                     // Flash operations use ROM functions and hold no exclusive hardware resources,
                     // so stealing the peripheral for a fresh FlashStorage is safe here.
-                    let flash =
-                        FlashStorage::new(unsafe { esp_hal::peripherals::FLASH::steal() });
+                    let flash = FlashStorage::new(unsafe { esp_hal::peripherals::FLASH::steal() });
                     provisioning::run_provisioning(usb_serial, flash);
                     // Never returns
                 }
