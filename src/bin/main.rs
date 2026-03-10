@@ -37,6 +37,7 @@ fn is_provisioning_button_pressed(button: &gpio::Input<'_>) -> bool {
 }
 
 /// Get WiFi credentials from NVS, returning None if none are stored.
+#[cfg(not(feature = "use-env"))]
 fn get_wifi_credentials(flash: FlashStorage<'static>) -> Option<(String, String)> {
     match wifi_config::load_credentials(flash) {
         Ok(creds) => {
@@ -83,24 +84,38 @@ async fn main(spawner: Spawner) -> ! {
         // Never returns
     }
 
-    // Check credentials before initializing Embassy/WiFi so FLASH is still free.
-    let creds = {
-        let flash = FlashStorage::new(peripherals.FLASH);
-        get_wifi_credentials(flash) // flash dropped after this block
-    };
+    let (ssid, password) = {
+        #[cfg(feature = "use-env")]
+        {
+            dprintln!("Using WiFi credentials from .env (use-env feature)");
+            (
+                alloc::string::String::from(core::env!("SSID")),
+                alloc::string::String::from(core::env!("PASSWORD")),
+            )
+        }
+        #[cfg(not(feature = "use-env"))]
+        {
+            // Check credentials before initializing Embassy/WiFi so FLASH is still free.
+            let creds = {
+                let flash = FlashStorage::new(peripherals.FLASH);
+                get_wifi_credentials(flash) // flash dropped after this block
+            };
 
-    let (ssid, password) = match creds {
-        Some(c) => c,
-        None => {
-            // No credentials stored yet - enter provisioning automatically.
-            dprintln!("No WiFi credentials found - entering setup mode automatically");
-            let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE);
-            // SAFETY: The FlashStorage created above has been dropped.
-            // Flash operations use ROM functions and hold no exclusive hardware resources,
-            // so stealing the peripheral for a fresh FlashStorage is safe here.
-            let flash = FlashStorage::new(unsafe { esp_hal::peripherals::FLASH::steal() });
-            provisioning::run_provisioning(usb_serial, flash);
-            // Never returns
+            match creds {
+                Some(c) => c,
+                None => {
+                    // No credentials stored yet - enter provisioning automatically.
+                    dprintln!("No WiFi credentials found - entering setup mode automatically");
+                    let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE);
+                    // SAFETY: The FlashStorage created above has been dropped.
+                    // Flash operations use ROM functions and hold no exclusive hardware resources,
+                    // so stealing the peripheral for a fresh FlashStorage is safe here.
+                    let flash =
+                        FlashStorage::new(unsafe { esp_hal::peripherals::FLASH::steal() });
+                    provisioning::run_provisioning(usb_serial, flash);
+                    // Never returns
+                }
+            }
         }
     };
 

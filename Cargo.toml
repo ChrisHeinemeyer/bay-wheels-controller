@@ -2,6 +2,9 @@
 # Route dprintln! to the USB serial port instead of RTT.
 # When set, serial_status_task is not spawned (USB serial is used for text output).
 debug-serial = []
+# Load SSID and PASSWORD from .env at build time (for development).
+# Copy .env.dist to .env and set your WiFi credentials.
+use-env = []
 
 [package]
 edition      = "2024"

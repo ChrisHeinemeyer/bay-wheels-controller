@@ -4,6 +4,50 @@ fn main() {
     println!("cargo:rustc-link-arg=-Tlinkall.x");
 
     generate_station_ids_ts();
+
+    if std::env::var("CARGO_FEATURE_USE_ENV").is_ok() {
+        load_env_file();
+    }
+}
+
+fn load_env_file() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let env_file = std::path::Path::new(&manifest_dir).join(".env");
+
+    if !env_file.exists() {
+        panic!(
+            "use-env feature enabled but .env not found. Copy .env.dist to .env and set SSID and PASSWORD."
+        );
+    }
+
+    let contents = std::fs::read_to_string(&env_file)
+        .unwrap_or_else(|e| panic!("use-env: failed to read .env: {}", e));
+
+    let mut ssid = None;
+    let mut password = None;
+
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            let value = value.trim().trim_matches('"').to_string();
+            match key {
+                "SSID" => ssid = Some(value),
+                "PASSWORD" => password = Some(value),
+                _ => {}
+            }
+        }
+    }
+
+    let ssid = ssid.expect("use-env: SSID not found in .env");
+    let password = password.expect("use-env: PASSWORD not found in .env");
+
+    println!("cargo:rustc-env=SSID={}", ssid);
+    println!("cargo:rustc-env=PASSWORD={}", password);
+    println!("cargo:rerun-if-changed=.env");
 }
 
 /// Parses `src/stations.rs` and emits `web/src/generated/station-ids.ts`.
