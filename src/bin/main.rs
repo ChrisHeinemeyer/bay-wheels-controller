@@ -17,7 +17,10 @@ use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup, usb_serial_jtag::U
 use esp_storage::FlashStorage;
 use rtt_target::rprintln;
 
-use bay_wheels_controller::tasks::{blink, fetch, input_read, serial_status, station_leds, wifi_connect};
+use bay_wheels_controller::tasks::{
+    blink, fetch, input_read, serial_status, station_leds, wifi_connect,
+};
+use bay_wheels_controller::tasks::signals::BoardId;
 use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -156,6 +159,25 @@ async fn main(spawner: Spawner) -> ! {
         .unwrap();
     mcpwm.timer0.start(timer_clock_cfg);
 
+    // Read the two-bit board ID from GPIO37 (bit 0) and GPIO38 (bit 1).
+    // Both pins are pulled up internally; a resistor to GND grounds a bit.
+    // Current board (no resistors) reads 0b11 = Board3.
+    let board_id = {
+        let gpio37 = gpio::Input::new(
+            peripherals.GPIO37,
+            gpio::InputConfig::default().with_pull(gpio::Pull::Up),
+        );
+        let gpio38 = gpio::Input::new(
+            peripherals.GPIO38,
+            gpio::InputConfig::default().with_pull(gpio::Pull::Up),
+        );
+        let bits = ((gpio38.is_high() as u8) << 1) | (gpio37.is_high() as u8);
+        let id = BoardId::from_bits(bits);
+        rprintln!("Board ID: {:?} (0b{:02b})", id, bits);
+        id
+        // gpio37 and gpio38 are dropped here — GPIO pins freed
+    };
+
     let shift_register = spi_devices::shift_register::ShiftRegister::new(
         peripherals.SPI2,
         gpio::Output::new(
@@ -217,7 +239,7 @@ async fn main(spawner: Spawner) -> ! {
         .spawn(fetch::fetch_task(stack))
         .expect("Failed to spawn fetch_task");
     spawner
-        .spawn(input_read::input_read_task(shift_register))
+        .spawn(input_read::input_read_task(shift_register, board_id))
         .expect("Failed to spawn input_read_task");
     spawner
         .spawn(serial_status::serial_status_task(usb_serial))

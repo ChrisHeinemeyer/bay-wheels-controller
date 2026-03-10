@@ -36,6 +36,12 @@ jobs:
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
+      - name: Bundle GBFS station data
+        run: |
+          mkdir -p web/public/gbfs
+          curl -fsSL -o web/public/gbfs/station_information.json \
+            "https://gbfs.lyft.com/gbfs/2.3/bay/en/station_information.json"
+
       - name: Install and build
         run: |
           cd web

@@ -6,7 +6,7 @@ use crate::spi_devices::al5887::enums::Led;
 use crate::tasks::signals::STATION_DATA_SIGNAL;
 use crate::tasks::signals::STATION_SIGNAL;
 use crate::tasks::signals::STATUS;
-use crate::tasks::signals::StationIdx;
+use crate::stations::StationIdx;
 use crate::tasks::station_parser::StationData;
 use embassy_time::{Duration, Timer};
 use heapless::Vec;

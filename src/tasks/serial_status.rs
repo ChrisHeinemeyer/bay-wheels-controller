@@ -53,7 +53,11 @@ fn build_frame(s: &SystemStatus) -> [u8; FRAME_SIZE] {
         .last_fetch_at
         .map(|t| {
             let secs = Instant::now().duration_since(t).as_secs();
-            if secs > u32::MAX as u64 { u32::MAX } else { secs as u32 }
+            if secs > u32::MAX as u64 {
+                u32::MAX
+            } else {
+                secs as u32
+            }
         })
         .unwrap_or(u32::MAX);
     buf[4..8].copy_from_slice(&fetch_age.to_le_bytes());
@@ -62,7 +66,7 @@ fn build_frame(s: &SystemStatus) -> [u8; FRAME_SIZE] {
 
     for i in 0..12 {
         let (r, g, b) = s.led_states[i];
-        buf[9 + i * 3]     = r;
+        buf[9 + i * 3] = r;
         buf[9 + i * 3 + 1] = g;
         buf[9 + i * 3 + 2] = b;
     }

@@ -3,31 +3,30 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 
-use int_enum::IntEnum;
-use strum::Display;
-
+use crate::stations::StationIdx;
 use crate::tasks::station_parser::StationData;
 
+/// Two-bit board identifier read from GPIO37 (bit 0) and GPIO38 (bit 1) at boot.
+/// Both pins are pulled up internally, so an unpopulated board reads 0b11 (Board3).
 #[repr(u8)]
-#[derive(Copy, Clone, IntEnum, PartialEq, Display, Debug)]
-pub enum StationIdx {
-    McallisterArguello = 0,
-    ArguelloEdward = 1,
-    HarrisonSeventeenthSt = 2,
-    ConservatoryOfFlowers = 3,
-    ArguelloGeary = 4,
-    SeventhAveCabrillo = 5,
-    EighthAveJfk = 6,
-    TurkStanyan = 7,
-    ParkerMcalister = 8,
-    FellStanyan = 9,
-    WallerShrader = 10,
-    PageMasonic = 11,
-    MlkSeventhAve = 12,
-    FrederickArguello = 13,
-    FifthAveAnza = 14,
-    SeventhAveClement = 15,
-    None = 255,
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum BoardId {
+    Board0 = 0b00,
+    Board1 = 0b01,
+    Board2 = 0b10,
+    Board3 = 0b11,
+}
+
+impl BoardId {
+    /// Construct from the two GPIO levels: `bit1` = GPIO38, `bit0` = GPIO37.
+    pub fn from_bits(bits: u8) -> Self {
+        match bits & 0b11 {
+            0b00 => BoardId::Board0,
+            0b01 => BoardId::Board1,
+            0b10 => BoardId::Board2,
+            _ => BoardId::Board3,
+        }
+    }
 }
 
 pub static STATION_SIGNAL: Signal<CriticalSectionRawMutex, StationIdx> = Signal::new();

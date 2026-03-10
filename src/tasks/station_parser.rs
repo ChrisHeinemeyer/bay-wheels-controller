@@ -1,7 +1,7 @@
 use heapless::String;
 use picojson::PullParser;
 
-use crate::tasks::signals::StationIdx;
+use crate::stations::StationIdx;
 
 /// Station data we care about
 #[derive(Debug, Clone, Copy)]

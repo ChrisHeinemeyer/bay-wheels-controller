@@ -1,5 +1,62 @@
-use crate::tasks::signals::StationIdx;
+use int_enum::IntEnum;
+use strum::Display;
 
+use crate::tasks::signals::BoardId;
+
+#[repr(u16)]
+#[derive(Copy, Clone, IntEnum, PartialEq, Display, Debug)]
+pub enum StationIdx {
+    McallisterArguello = 0,
+    ArguelloEdward,
+    HarrisonSeventeenthSt,
+    ConservatoryOfFlowers,
+    ArguelloGeary,
+    SeventhAveCabrillo,
+    EighthAveJfk,
+    TurkStanyan,
+    ParkerMcalister,
+    FellStanyan,
+    WallerShrader,
+    PageMasonic,
+    MlkSeventhAve,
+    FrederickArguello,
+    FifthAveAnza,
+    SeventhAveClement,
+    None = 65535,
+}
+
+/// Maps each board's shift-register bit positions (0 = first bit shifted out from MSB)
+/// to the `StationIdx` that bit represents.  Bits not listed resolve to `StationIdx::None`.
+///
+/// Add a new `(BoardId::BoardN, &[...])` entry when a new board layout is defined.
+pub static BOARD_STATION_MAP: &[(BoardId, &[(u16, StationIdx)])] = &[
+    (
+        BoardId::Board3,
+        &[
+            (0, StationIdx::McallisterArguello),
+            (1, StationIdx::ArguelloEdward),
+            (2, StationIdx::HarrisonSeventeenthSt),
+            (3, StationIdx::ConservatoryOfFlowers),
+            (4, StationIdx::ArguelloGeary),
+            (5, StationIdx::SeventhAveCabrillo),
+            (6, StationIdx::EighthAveJfk),
+            (7, StationIdx::TurkStanyan),
+            (8, StationIdx::ParkerMcalister),
+            (9, StationIdx::FellStanyan),
+            (10, StationIdx::WallerShrader),
+            (11, StationIdx::PageMasonic),
+            (12, StationIdx::MlkSeventhAve),
+            (13, StationIdx::FrederickArguello),
+            (14, StationIdx::FifthAveAnza),
+            (15, StationIdx::SeventhAveClement),
+        ],
+    ),
+    // (BoardId::Board0, &[ ... ]),
+    // (BoardId::Board1, &[ ... ]),
+    // (BoardId::Board2, &[ ... ]),
+];
+
+/// Maps GBFS station UUIDs to their `StationIdx` for the GBFS fetch task.
 pub static TARGET_STATIONS: &[(&str, StationIdx)] = &[
     (
         "bfb90ed7-6039-4c61-9b13-fb60b1786dde",
