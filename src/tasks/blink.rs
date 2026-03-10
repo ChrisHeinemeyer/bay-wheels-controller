@@ -1,5 +1,4 @@
 use embassy_time::{Duration, Timer};
-use rtt_target::rprintln;
 
 #[embassy_executor::task]
 pub async fn blink_task(
@@ -10,7 +9,7 @@ pub async fn blink_task(
         true,
     >,
 ) {
-    rprintln!("Blink task started!");
+    crate::dprintln!("Blink task started!");
     loop {
         pin.set_timestamp(0);
         Timer::after(Duration::from_secs(1)).await;

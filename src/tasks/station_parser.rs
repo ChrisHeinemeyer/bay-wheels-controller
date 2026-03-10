@@ -7,8 +7,8 @@ use crate::stations::StationIdx;
 #[derive(Debug, Clone, Copy)]
 pub struct StationData {
     pub station_idx: StationIdx,
-    pub num_bikes_available: u32,
-    pub num_ebikes_available: u32,
+    pub num_bikes_available: u8,
+    pub num_ebikes_available: u8,
 }
 
 impl Default for StationData {
@@ -34,8 +34,8 @@ pub struct StreamingStationParser {
     remainder: String<8192>, // Can hold one complete station object
     phase: ParserPhase,
     // Counters
-    station_count: u32,
-    ignored_count: u32,
+    station_count: u16,
+    ignored_count: u16,
 }
 
 impl StreamingStationParser {
@@ -193,8 +193,8 @@ impl StreamingStationParser {
         let mut parser = picojson::SliceParser::new(json);
 
         let mut station_id: Option<String<64>> = None;
-        let mut num_bikes_available: Option<u32> = None;
-        let mut num_ebikes_available: Option<u32> = None;
+        let mut num_bikes_available: Option<u8> = None;
+        let mut num_ebikes_available: Option<u8> = None;
         let mut last_key = String::<32>::new();
 
         while let Some(event_result) = parser.next() {
@@ -212,7 +212,7 @@ impl StreamingStationParser {
                         }
                     }
                     picojson::Event::Number(num) => {
-                        if let Ok(val) = num.as_str().parse::<u32>() {
+                        if let Ok(val) = num.as_str().parse::<u8>() {
                             if last_key == "num_bikes_available" {
                                 num_bikes_available = Some(val);
                             } else if last_key == "num_ebikes_available" {

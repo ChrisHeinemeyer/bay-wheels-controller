@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bay Wheels Board Mapper</title>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Header ──────────────────────────────────────────────────────── -->
+    <header>
+      <h1>Bay Wheels Board Mapper</h1>
+
+      <div class="toolbar">
+        <button id="btn-connect-serial" class="btn-primary">Connect Serial</button>
+        <button id="btn-load-session"   disabled>Load Session</button>
+        <button id="btn-select-area"    disabled>Select Area</button>
+        <button id="btn-start-mapping"  disabled class="btn-primary">Start Mapping</button>
+        <button id="btn-export"         disabled>Export YAML</button>
+      </div>
+
+      <span id="serial-badge" class="badge">Serial: Disconnected</span>
+      <span id="status-badge" class="badge">Loading…</span>
+
+      <span class="badge" style="margin-left:auto">
+        <span id="station-count">0</span> stations in area
+        &nbsp;·&nbsp;
+        <span id="mapping-count">0</span> mapped
+      </span>
+    </header>
+
+    <!-- ── Body ────────────────────────────────────────────────────────── -->
+    <div class="body">
+
+      <!-- Map fills the remaining space -->
+      <div id="map"></div>
+
+      <!-- Sidebar -->
+      <div id="sidebar">
+
+        <!-- Current station (shown during mapping) -->
+        <div class="sidebar-section" id="mapping-controls-section">
+          <h2>Current Station</h2>
+          <div id="current-panel" hidden>
+            <div id="current-name" class="pulse">—</div>
+            <div id="current-id">—</div>
+            <div id="current-progress"></div>
+            <div class="action-row">
+              <button id="btn-skip"         class="btn-warn"   disabled>Skip</button>
+              <button id="btn-undo"         class="btn-danger" disabled>Undo Last</button>
+              <button id="btn-manual-input" disabled>Manual Input</button>
+            </div>
+          </div>
+          <div id="idle-hint" style="color:var(--text-dim);font-size:0.8rem;line-height:1.5">
+            1. Connect serial port (Chrome / Edge)<br>
+            2. Load a previous session (optional)<br>
+            3. Click <strong>Select Area</strong> and draw a bbox on the map<br>
+            4. Click <strong>Start Mapping</strong> and touch each station's button
+          </div>
+        </div>
+
+        <!-- Serial log -->
+        <div id="serial-log-wrap">
+          <h2>Serial Log</h2>
+          <div id="serial-log"></div>
+        </div>
+
+        <!-- Completed mappings -->
+        <div id="mappings-wrap">
+          <h2>
+            Mappings
+            <span id="mapping-count-badge" style="font-size:0.7rem;color:var(--ok)"></span>
+          </h2>
+          <div id="mappings-list"></div>
+        </div>
+
+      </div><!-- /sidebar -->
+    </div><!-- /body -->
+  </div><!-- /app -->
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

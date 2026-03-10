@@ -36,7 +36,10 @@ fn generate_station_ids_ts() {
             '[' if !in_str => depth += 1,
             ']' if !in_str => {
                 depth -= 1;
-                if depth == 0 { array_end = i; break; }
+                if depth == 0 {
+                    array_end = i;
+                    break;
+                }
             }
             _ => {}
         }
@@ -53,7 +56,9 @@ fn generate_station_ids_ts() {
         if bytes[i] == b'"' {
             let start = i + 1;
             let mut end = start;
-            while end < bytes.len() && bytes[end] != b'"' { end += 1; }
+            while end < bytes.len() && bytes[end] != b'"' {
+                end += 1;
+            }
             let s = &array_body[start..end];
             if s.len() > 8 && (s.contains('-') || s.chars().all(|c| c.is_ascii_digit())) {
                 ids.push(s.to_string());
@@ -65,8 +70,7 @@ fn generate_station_ids_ts() {
     }
 
     let out_dir = "web/src/generated";
-    std::fs::create_dir_all(out_dir)
-        .expect("build.rs: could not create web/src/generated");
+    std::fs::create_dir_all(out_dir).expect("build.rs: could not create web/src/generated");
 
     let mut ts = String::new();
     ts.push_str("// Generated from src/stations.rs by build.rs — do not edit manually.\n");

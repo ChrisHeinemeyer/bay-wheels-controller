@@ -1,22 +1,23 @@
 // ── Frame protocol ────────────────────────────────────────────────────────────
 //
-// 46-byte binary frame emitted by the device every 500 ms:
+// 49-byte binary frame emitted by the device every 500 ms:
 //
-// | Offset | Size | Field                                    |
-// |--------|------|------------------------------------------|
-// |  0     |  1   | magic = 0xAB                             |
-// |  1     |  1   | battery_pct                              |
-// |  2     |  1   | wifi_connected (0/1)                     |
-// |  3     |  1   | rssi (i8 bits)                           |
-// |  4     |  4   | fetch_age_secs LE  (0xFFFFFFFF = never)  |
-// |  8     |  1   | station_input                            |
-// |  9     | 36   | led_rgb — 12 × (r, g, b)                 |
-// | 45     |  1   | XOR checksum of bytes 0–44               |
+// | Offset | Size | Field                                          |
+// |--------|------|------------------------------------------------|
+// |  0     |  1   | magic = 0xAB                                   |
+// |  1     |  1   | battery_pct                                    |
+// |  2     |  1   | wifi_connected (0/1)                           |
+// |  3     |  1   | rssi (i8 bits)                                 |
+// |  4     |  4   | fetch_age_secs LE  (0xFFFFFFFF = never)        |
+// |  8     |  2   | station_input LE  (StationIdx ordinal as u16)  |
+// | 10     |  2   | station_input_raw LE  (raw shift register u16) |
+// | 12     | 36   | led_rgb — 12 × (r, g, b)                       |
+// | 48     |  1   | XOR checksum of bytes 0–47                     |
 
 import { STATION_IDS } from "./generated/station-ids";
 
 const MAGIC      = 0xAB;
-const FRAME_SIZE = 46;
+const FRAME_SIZE = 49;
 
 // Fetches station names from the GBFS station_information feed (or the copy
 // bundled into the deployment at /gbfs/station_information.json) and returns
@@ -47,26 +48,28 @@ const LED_GRID_ORDER = [0, 1, 2, 3, 4, 5, 11, 10, 9, 8, 7, 6];
 
 interface LedColor { r: number; g: number; b: number; }
 interface StatusFrame {
-  batteryPct:    number;
-  wifiConnected: boolean;
-  rssi:          number;
-  fetchAgeSecs:  number;
-  stationInput:  number;
-  leds:          LedColor[];
+  batteryPct:       number;
+  wifiConnected:    boolean;
+  rssi:             number;
+  fetchAgeSecs:     number;
+  stationInput:     number;
+  stationInputRaw:  number;
+  leds:             LedColor[];
 }
 
 function parseFrame(buf: Uint8Array): StatusFrame {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   return {
-    batteryPct:    buf[1],
-    wifiConnected: buf[2] === 1,
-    rssi:          view.getInt8(3),
-    fetchAgeSecs:  view.getUint32(4, true),
-    stationInput:  buf[8],
+    batteryPct:      buf[1],
+    wifiConnected:   buf[2] === 1,
+    rssi:            view.getInt8(3),
+    fetchAgeSecs:    view.getUint32(4, true),
+    stationInput:    view.getUint16(8, true),
+    stationInputRaw: view.getUint16(10, true),
     leds: Array.from({ length: 12 }, (_, i) => ({
-      r: buf[9 + i * 3],
-      g: buf[9 + i * 3 + 1],
-      b: buf[9 + i * 3 + 2],
+      r: buf[12 + i * 3],
+      g: buf[12 + i * 3 + 1],
+      b: buf[12 + i * 3 + 2],
     })),
   };
 }

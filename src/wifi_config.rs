@@ -6,7 +6,6 @@ use alloc::string::String;
 use esp_nvs::platform::EspFlash;
 use esp_nvs::{Key, Nvs};
 use esp_storage::FlashStorage;
-use rtt_target::rprintln;
 
 /// NVS partition offset - adjust based on your partition table
 /// Default ESP-IDF NVS partition starts at 0x9000
@@ -33,7 +32,7 @@ pub fn load_credentials(flash: FlashStorage<'static>) -> Result<WifiCredentials,
     let mut platform = EspFlash::new(flash);
     let mut nvs =
         Nvs::new(NVS_PARTITION_OFFSET, NVS_PARTITION_SIZE, &mut platform).map_err(|e| {
-            rprintln!("NVS init error: {:?}", e);
+            crate::dprintln!("NVS init error: {:?}", e);
             WifiConfigError::NvsError
         })?;
 
@@ -42,12 +41,12 @@ pub fn load_credentials(flash: FlashStorage<'static>) -> Result<WifiCredentials,
     let password_key = Key::from_str("password");
 
     let ssid: String = nvs.get(&namespace, &ssid_key).map_err(|e| {
-        rprintln!("Failed to read SSID: {:?}", e);
+        crate::dprintln!("Failed to read SSID: {:?}", e);
         WifiConfigError::NotFound
     })?;
 
     let password: String = nvs.get(&namespace, &password_key).map_err(|e| {
-        rprintln!("Failed to read password: {:?}", e);
+        crate::dprintln!("Failed to read password: {:?}", e);
         WifiConfigError::NotFound
     })?;
 
@@ -63,7 +62,7 @@ pub fn save_credentials(
     let mut platform = EspFlash::new(flash);
     let mut nvs =
         Nvs::new(NVS_PARTITION_OFFSET, NVS_PARTITION_SIZE, &mut platform).map_err(|e| {
-            rprintln!("NVS init error: {:?}", e);
+            crate::dprintln!("NVS init error: {:?}", e);
             WifiConfigError::NvsError
         })?;
 
@@ -72,15 +71,15 @@ pub fn save_credentials(
     let password_key = Key::from_str("password");
 
     nvs.set(&namespace, &ssid_key, ssid).map_err(|e| {
-        rprintln!("Failed to write SSID: {:?}", e);
+        crate::dprintln!("Failed to write SSID: {:?}", e);
         WifiConfigError::NvsError
     })?;
 
     nvs.set(&namespace, &password_key, password).map_err(|e| {
-        rprintln!("Failed to write password: {:?}", e);
+        crate::dprintln!("Failed to write password: {:?}", e);
         WifiConfigError::NvsError
     })?;
 
-    rprintln!("WiFi credentials saved to NVS");
+    crate::dprintln!("WiFi credentials saved to NVS");
     Ok(())
 }

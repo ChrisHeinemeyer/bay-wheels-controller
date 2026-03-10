@@ -3,30 +3,29 @@ use core::cmp::min;
 use crate::spi_devices::al5887::al5887::Al5887;
 use crate::spi_devices::al5887::enums::Color;
 use crate::spi_devices::al5887::enums::Led;
+use crate::stations::{STATION_DATA_LEN, StationIdx};
 use crate::tasks::signals::STATION_DATA_SIGNAL;
 use crate::tasks::signals::STATION_SIGNAL;
 use crate::tasks::signals::STATUS;
-use crate::stations::StationIdx;
 use crate::tasks::station_parser::StationData;
 use embassy_time::{Duration, Timer};
 use heapless::Vec;
-use rtt_target::rprintln;
 
 #[embassy_executor::task]
 pub async fn station_leds_task(mut al5887: Al5887<'static>) {
-    rprintln!("Station LEDs task started!");
+    crate::dprintln!("Station LEDs task started!");
     al5887.init_driver().await.unwrap();
     let mut last_station = StationIdx::None;
     let mut station_data = STATION_DATA_SIGNAL.wait().await;
-    rprintln!("Ready to go!");
+    crate::dprintln!("Ready to go!");
     loop {
         let station = STATION_SIGNAL.wait().await;
         if station != last_station {
-            rprintln!("Station: {:?}", station);
+            crate::dprintln!("Station: {:?}", station);
             let updated_station_data = STATION_DATA_SIGNAL.try_take();
             if let Some(updated_station_data) = updated_station_data {
                 station_data = updated_station_data;
-                rprintln!("fresh data!");
+                crate::dprintln!("fresh data!");
             }
             last_station = station;
             if station == StationIdx::None {
@@ -36,7 +35,7 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
                     .await
                     .unwrap();
             } else {
-                let leds = get_leds(station, station_data);
+                let leds = get_leds(station, &station_data);
                 {
                     let mut guard = STATUS.lock().await;
                     guard.led_states = [(0, 0, 0); 12];
@@ -76,39 +75,31 @@ pub const MAX_LEDS: usize = 12;
 
 fn get_leds(
     station_idx: StationIdx,
-    station_data: [StationData; 16],
+    station_data: &[StationData; STATION_DATA_LEN],
 ) -> Vec<(Led, Color), MAX_LEDS> {
     let mut leds = Vec::new();
-    for station in station_data.iter() {
-        if station.station_idx == station_idx {
-            for led in 0..min(
-                station.num_ebikes_available,
-                MECHANICAL_BIKE_LEDS.len() as u32,
-            ) {
-                let ebike_res = leds.push((EBIKE_LEDS[led as usize], EBIKE_COLOR));
-                let _ = match ebike_res {
-                    Ok(()) => true,
-                    Err(e) => {
-                        rprintln!("Error pushing ebike led: {:?}", e);
-                        false
-                    }
-                };
+    // Index directly by ordinal — O(1) lookup.
+    let station = &station_data[station_idx as usize];
+    for led in 0..min(station.num_ebikes_available, EBIKE_LEDS.len() as u8) {
+        let _ = match leds.push((EBIKE_LEDS[led as usize], EBIKE_COLOR)) {
+            Ok(()) => true,
+            Err(e) => {
+                crate::dprintln!("Error pushing ebike led: {:?}", e);
+                false
             }
-            for led in 0..min(
-                station.num_bikes_available,
-                MECHANICAL_BIKE_LEDS.len() as u32,
-            ) {
-                let mech_res =
-                    leds.push((MECHANICAL_BIKE_LEDS[led as usize], MECHANICAL_BIKE_COLOR));
-                let _ = match mech_res {
-                    Ok(()) => true,
-                    Err(e) => {
-                        rprintln!("Error pushing mech bike led: {:?}", e);
-                        false
-                    }
-                };
+        };
+    }
+    for led in 0..min(
+        station.num_bikes_available,
+        MECHANICAL_BIKE_LEDS.len() as u8,
+    ) {
+        let _ = match leds.push((MECHANICAL_BIKE_LEDS[led as usize], MECHANICAL_BIKE_COLOR)) {
+            Ok(()) => true,
+            Err(e) => {
+                crate::dprintln!("Error pushing mech bike led: {:?}", e);
+                false
             }
-        }
+        };
     }
     leds
 }

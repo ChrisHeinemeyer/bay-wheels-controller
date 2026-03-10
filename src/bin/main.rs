@@ -11,17 +11,16 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::String;
+use bay_wheels_controller::dprintln;
+#[cfg(not(feature = "debug-serial"))]
+use bay_wheels_controller::tasks::serial_status;
+use bay_wheels_controller::tasks::signals::BoardId;
+use bay_wheels_controller::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
+use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup, usb_serial_jtag::UsbSerialJtag};
 use esp_storage::FlashStorage;
-use rtt_target::rprintln;
-
-use bay_wheels_controller::tasks::{
-    blink, fetch, input_read, serial_status, station_leds, wifi_connect,
-};
-use bay_wheels_controller::tasks::signals::BoardId;
-use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -41,7 +40,7 @@ fn is_provisioning_button_pressed(button: &gpio::Input<'_>) -> bool {
 fn get_wifi_credentials(flash: FlashStorage<'static>) -> Option<(String, String)> {
     match wifi_config::load_credentials(flash) {
         Ok(creds) => {
-            rprintln!("Using WiFi credentials from NVS");
+            dprintln!("Using WiFi credentials from NVS");
             Some((creds.ssid, creds.password))
         }
         Err(_) => None,
@@ -54,9 +53,10 @@ fn get_wifi_credentials(flash: FlashStorage<'static>) -> Option<(String, String)
 )]
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    // Initialize RTT for logging
+    // RTT is only needed when debug-serial is off.
+    #[cfg(not(feature = "debug-serial"))]
     rtt_target::rtt_init_print!();
-    rprintln!("Starting ESP32-S3...");
+    dprintln!("Starting ESP32-S3...");
 
     // Initialize ESP-HAL with max CPU clock
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -76,7 +76,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // Enter provisioning if GPIO2 was held at boot.
     if button_pressed {
-        rprintln!("Provisioning button pressed - entering WiFi setup mode");
+        dprintln!("Provisioning button pressed - entering WiFi setup mode");
         let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE);
         let flash = FlashStorage::new(peripherals.FLASH);
         provisioning::run_provisioning(usb_serial, flash);
@@ -93,7 +93,7 @@ async fn main(spawner: Spawner) -> ! {
         Some(c) => c,
         None => {
             // No credentials stored yet - enter provisioning automatically.
-            rprintln!("No WiFi credentials found - entering setup mode automatically");
+            dprintln!("No WiFi credentials found - entering setup mode automatically");
             let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE);
             // SAFETY: The FlashStorage created above has been dropped.
             // Flash operations use ROM functions and hold no exclusive hardware resources,
@@ -107,7 +107,7 @@ async fn main(spawner: Spawner) -> ! {
     // Initialize Embassy executor
     let timg0 = TimerGroup::new(peripherals.TIMG1);
     esp_rtos::start(timg0.timer0);
-    rprintln!("Embassy initialized!");
+    dprintln!("Embassy initialized!");
 
     // Initialize WiFi radio
     let radio_init_value = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
@@ -173,7 +173,7 @@ async fn main(spawner: Spawner) -> ! {
         );
         let bits = ((gpio38.is_high() as u8) << 1) | (gpio37.is_high() as u8);
         let id = BoardId::from_bits(bits);
-        rprintln!("Board ID: {:?} (0b{:02b})", id, bits);
+        dprintln!("Board ID: {:?} (0b{:02b})", id, bits);
         id
         // gpio37 and gpio38 are dropped here — GPIO pins freed
     };
@@ -223,12 +223,14 @@ async fn main(spawner: Spawner) -> ! {
         ),
     );
 
-    // Serial status reporter — USB_DEVICE is free in normal (non-provisioning) boot.
-    // Async mode so writes time out instead of blocking when no host is listening.
-    let usb_serial = UsbSerialJtag::new(peripherals.USB_DEVICE).into_async();
+    // USB_DEVICE is free in normal (non-provisioning) boot.
+    // debug-serial  → blocking mode, owned by the logger; serial_status not spawned.
+    // normal        → async mode, owned by serial_status_task (binary frames).
+    #[cfg(feature = "debug-serial")]
+    bay_wheels_controller::logger::init(UsbSerialJtag::new(peripherals.USB_DEVICE));
 
     // Spawn tasks
-    rprintln!("Spawning tasks...");
+    dprintln!("Spawning tasks...");
     spawner
         .spawn(blink::blink_task(pwm_pin))
         .expect("Failed to spawn blink_task");
@@ -241,10 +243,13 @@ async fn main(spawner: Spawner) -> ! {
     spawner
         .spawn(input_read::input_read_task(shift_register, board_id))
         .expect("Failed to spawn input_read_task");
+    #[cfg(not(feature = "debug-serial"))]
     spawner
-        .spawn(serial_status::serial_status_task(usb_serial))
+        .spawn(serial_status::serial_status_task(
+            UsbSerialJtag::new(peripherals.USB_DEVICE).into_async(),
+        ))
         .expect("Failed to spawn serial_status_task");
-    rprintln!("All tasks spawned!");
+    dprintln!("All tasks spawned!");
 
     // Main loop - keep alive
     loop {

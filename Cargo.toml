@@ -1,3 +1,8 @@
+[features]
+# Route dprintln! to the USB serial port instead of RTT.
+# When set, serial_status_task is not spawned (USB serial is used for text output).
+debug-serial = []
+
 [package]
 edition      = "2024"
 name         = "bay-wheels-controller"

@@ -9,7 +9,6 @@ use esp_hal::delay::Delay;
 use esp_hal::time::{Duration, Instant};
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use esp_storage::FlashStorage;
-use rtt_target::rprintln;
 
 use crate::wifi_config;
 
@@ -27,7 +26,7 @@ pub fn run_provisioning(
     mut serial: UsbSerialJtag<'static, esp_hal::Blocking>,
     _flash: FlashStorage<'static>,
 ) -> ! {
-    rprintln!("Entering WiFi provisioning mode...");
+    crate::dprintln!("Entering WiFi provisioning mode...");
 
     let delay = Delay::new();
 

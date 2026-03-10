@@ -1,7 +1,6 @@
 use alloc::string::String;
 use embassy_time::{Duration, Timer};
 use esp_radio::wifi::{AuthMethod, WifiController};
-use rtt_target::rprintln;
 
 use crate::tasks::signals::STATUS;
 
@@ -13,10 +12,10 @@ pub async fn wifi_connect_task(
 ) {
     controller.set_mode(esp_radio::wifi::WifiMode::Sta).unwrap();
     controller.start().unwrap();
-    rprintln!("WiFi controller started!");
+    crate::dprintln!("WiFi controller started!");
 
     // Scan for networks
-    rprintln!("Scanning for networks...");
+    crate::dprintln!("Scanning for networks...");
     let scan_config = esp_radio::wifi::ScanConfig::default().with_scan_type(
         esp_radio::wifi::ScanTypeConfig::Active {
             min: core::time::Duration::from_millis(100),
@@ -27,12 +26,12 @@ pub async fn wifi_connect_task(
     let scan_result = controller
         .scan_with_config(scan_config)
         .expect("Failed to scan for networks");
-    rprintln!("Found {} networks", scan_result.len());
+    crate::dprintln!("Found {} networks", scan_result.len());
 
     // Find target AP and display details
     let mut target_ap = None;
     for ap in scan_result.iter() {
-        rprintln!(
+        crate::dprintln!(
             "  SSID: {}, RSSI: {}, Auth: {:?}, Channel: {:?}",
             ap.ssid,
             ap.signal_strength,
@@ -45,13 +44,13 @@ pub async fn wifi_connect_task(
     }
 
     let target_ap = target_ap.expect("Could not find target SSID in scan results");
-    rprintln!("");
-    rprintln!("Target AP details:");
-    rprintln!("  SSID: {}", target_ap.ssid);
-    rprintln!("  RSSI: {} dBm", target_ap.signal_strength);
-    rprintln!("  Channel: {:?}", target_ap.channel);
-    rprintln!("  Auth Method: {:?}", target_ap.auth_method);
-    rprintln!("");
+    crate::dprintln!("");
+    crate::dprintln!("Target AP details:");
+    crate::dprintln!("  SSID: {}", target_ap.ssid);
+    crate::dprintln!("  RSSI: {} dBm", target_ap.signal_strength);
+    crate::dprintln!("  Channel: {:?}", target_ap.channel);
+    crate::dprintln!("  Auth Method: {:?}", target_ap.auth_method);
+    crate::dprintln!("");
 
     // Configure with scanned AP settings
     let client_config = esp_radio::wifi::ClientConfig::default()
@@ -60,20 +59,20 @@ pub async fn wifi_connect_task(
         .with_auth_method(target_ap.auth_method.unwrap_or(AuthMethod::Wpa2Personal))
         .with_channel(target_ap.channel);
 
-    rprintln!("Setting WiFi config for SSID: '{}'", ssid);
-    rprintln!("  Auth method: {:?}", target_ap.auth_method);
-    rprintln!("  Channel: {:?}", target_ap.channel);
+    crate::dprintln!("Setting WiFi config for SSID: '{}'", ssid);
+    crate::dprintln!("  Auth method: {:?}", target_ap.auth_method);
+    crate::dprintln!("  Channel: {:?}", target_ap.channel);
 
     controller
         .set_config(&esp_radio::wifi::ModeConfig::Client(client_config))
         .unwrap();
 
     // Connect
-    rprintln!("Initiating connection...");
+    crate::dprintln!("Initiating connection...");
     match controller.connect() {
-        Ok(_) => rprintln!("Connect command sent successfully"),
+        Ok(_) => crate::dprintln!("Connect command sent successfully"),
         Err(e) => {
-            rprintln!("Connect command failed: {:?}", e);
+            crate::dprintln!("Connect command failed: {:?}", e);
             panic!("Failed to initiate connection");
         }
     }
@@ -88,15 +87,15 @@ pub async fn wifi_connect_task(
 
         if is_connected != last_status {
             if is_connected {
-                rprintln!("✓ Status changed: CONNECTED");
+                crate::dprintln!("✓ Status changed: CONNECTED");
             } else {
-                rprintln!("✗ Status changed: DISCONNECTED");
+                crate::dprintln!("✗ Status changed: DISCONNECTED");
             }
             last_status = is_connected;
         }
 
         if is_connected {
-            rprintln!("✓ WiFi connected successfully!");
+            crate::dprintln!("✓ WiFi connected successfully!");
             {
                 let mut guard = STATUS.lock().await;
                 guard.wifi_connected = true;
@@ -107,19 +106,19 @@ pub async fn wifi_connect_task(
 
         attempts += 1;
         if attempts > max_attempts {
-            rprintln!(
+            crate::dprintln!(
                 "✗ Failed to connect to WiFi after {} seconds",
                 max_attempts / 10
             );
-            rprintln!("Possible reasons:");
-            rprintln!("  - Wrong password");
-            rprintln!("  - Weak signal (RSSI: {})", target_ap.signal_strength);
-            rprintln!("  - AP authentication issues");
+            crate::dprintln!("Possible reasons:");
+            crate::dprintln!("  - Wrong password");
+            crate::dprintln!("  - Weak signal (RSSI: {})", target_ap.signal_strength);
+            crate::dprintln!("  - AP authentication issues");
             panic!("WiFi connection timeout");
         }
 
         if attempts % 10 == 0 {
-            rprintln!(
+            crate::dprintln!(
                 "Waiting for connection... ({}s) [RSSI: {}]",
                 attempts / 10,
                 target_ap.signal_strength
@@ -134,7 +133,7 @@ pub async fn wifi_connect_task(
         let connected = controller.is_connected().unwrap_or(false);
         STATUS.lock().await.wifi_connected = connected;
         if !connected {
-            rprintln!("⚠ WiFi disconnected! Attempting reconnect...");
+            crate::dprintln!("⚠ WiFi disconnected! Attempting reconnect...");
             let _ = controller.connect();
         }
         Timer::after(Duration::from_secs(5)).await;
