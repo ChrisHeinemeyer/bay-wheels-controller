@@ -486,3 +486,12 @@ section {
 #statusDisplay .led-grid {
   max-width: 240px;
 }
+
+/* Station map markers — Maki marker-stroked icon */
+.station-marker-icon {
+  background: none !important;
+  border: none !important;
+}
+.station-marker-icon svg {
+  display: block;
+}

@@ -65,20 +65,42 @@ async function fetchStationsWithCoords(): Promise<GbfsStation[]> {
 
 const LED_GRID_ORDER = [0, 1, 2, 3, 4, 5, 11, 10, 9, 8, 7, 6];
 
-const MAP_DEFAULT_STYLE = {
-  fillColor: "#60a5fa",
-  color: "#2563eb",
-  radius: 3,
-  weight: 1,
-  fillOpacity: 0.5,
-};
-const MAP_HIGHLIGHT_STYLE = {
-  fillColor: "#DE24FB",
-  color: "#661174",
-  radius: 15,
-  weight: 2,
-  fillOpacity: 1,
-};
+// Maki marker SVG (https://github.com/mapbox/maki/blob/main/icons/marker.svg)
+// Single closed path — solid fill. iconAnchor = bottom center, pin tip at station coordinate
+const MARKER_SVG_PATH =
+  "M7.5 1C5.42312 1 3 2.2883 3 5.56759C3 7.79276 6.46156 12.7117 7.5 14C8.42309 12.7117 12 7.90993 12 5.56759C12 2.2883 9.57688 1 7.5 1Z";
+
+const BASE_SIZE = 24;
+
+function createMarkerIcon(
+  fillColor: string,
+  strokeColor: string,
+  className: string,
+  scale: number,
+): L.DivIcon {
+  const size = Math.round(BASE_SIZE * scale);
+  const anchorX = size / 2;
+  const anchorY = size;
+  return L.divIcon({
+    className: `station-marker-icon ${className}`,
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 15 15" xmlns="http://www.w3.org/2000/svg"><path fill="${fillColor}" stroke="${strokeColor}" stroke-width="1" d="${MARKER_SVG_PATH}"/></svg>`,
+    iconSize: [size, size],
+    iconAnchor: [anchorX, anchorY],
+  });
+}
+
+const MARKER_ICON_DEFAULT = createMarkerIcon(
+  "#C4DCF9",
+  "#8BADF7",
+  "station-marker-default",
+  0.8,
+);
+const MARKER_ICON_HIGHLIGHT = createMarkerIcon(
+  "#FF00BFFF",
+  "#FF00BFFF",
+  "station-marker-highlight",
+  1.2,
+);
 
 /** Wire up the Status tab. Self-contained — no shared state with other tabs. */
 export function initStatusTab(): void {
@@ -109,20 +131,18 @@ export function initStatusTab(): void {
   let accumulator: number[] = [];
 
   let map: L.Map | null = null;
-  const markers = new Map<string, L.CircleMarker>();
+  const markers = new Map<string, L.Marker>();
   let currentHighlight: string | null = null;
   const targetIds = new Set(Object.values(STATION_IDS));
 
   function setMapHighlight(stationId: string | null) {
     if (currentHighlight === stationId) return;
     if (currentHighlight) {
-      markers.get(currentHighlight)?.setStyle(MAP_DEFAULT_STYLE);
+      markers.get(currentHighlight)?.setIcon(MARKER_ICON_DEFAULT);
     }
     currentHighlight = stationId;
     if (stationId) {
-      markers.get(stationId)?.setStyle(MAP_HIGHLIGHT_STYLE);
-      const m = markers.get(stationId);
-      // if (m) map?.panTo(m.getLatLng(), { animate: true, duration: 0.3 });
+      markers.get(stationId)?.setIcon(MARKER_ICON_HIGHLIGHT);
     }
   }
 
@@ -142,7 +162,7 @@ export function initStatusTab(): void {
       }).addTo(map);
 
       for (const st of ourStations) {
-        const m = L.circleMarker([st.lat, st.lon], { ...MAP_DEFAULT_STYLE })
+        const m = L.marker([st.lat, st.lon], { icon: MARKER_ICON_DEFAULT })
           .addTo(map!)
           .bindTooltip(st.name, { direction: "top", offset: [0, -8] });
         markers.set(st.station_id, m);
