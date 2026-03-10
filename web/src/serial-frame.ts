@@ -1,10 +1,14 @@
 // ── Frame protocol ────────────────────────────────────────────────────────────
 //
-// 49-byte binary frame emitted by the device every 500 ms.
-// See src/tasks/serial_status.rs for the device-side layout.
+// Version frame (34 bytes): sent once at startup. Magic 0xAC, 32-byte UTF-8 version, XOR checksum.
+// Status frame (49 bytes): emitted every 500 ms. See src/tasks/serial_status.rs for layout.
 
 export const MAGIC = 0xab;
 export const FRAME_SIZE = 49;
+
+export const VERSION_MAGIC = 0xac;
+const VERSION_STR_LEN = 32;
+export const VERSION_FRAME_SIZE = 1 + VERSION_STR_LEN + 1;
 
 export interface StatusFrame {
   batteryPct: number;
@@ -36,4 +40,19 @@ export function parseFrame(buf: Uint8Array): StatusFrame {
 export function checksumValid(buf: number[]): boolean {
   const xor = buf.slice(0, FRAME_SIZE - 1).reduce((a, b) => a ^ b, 0);
   return xor === buf[FRAME_SIZE - 1];
+}
+
+export function parseVersionFrame(buf: Uint8Array): string | null {
+  if (buf.length < VERSION_FRAME_SIZE || buf[0] !== VERSION_MAGIC) return null;
+  const xor = buf.slice(0, VERSION_FRAME_SIZE - 1).reduce((a, b) => a ^ b, 0);
+  if (xor !== buf[VERSION_FRAME_SIZE - 1]) return null;
+  const versionBytes = buf.slice(1, 1 + VERSION_STR_LEN);
+  const nullIdx = versionBytes.indexOf(0);
+  const len = nullIdx >= 0 ? nullIdx : VERSION_STR_LEN;
+  return new TextDecoder().decode(versionBytes.slice(0, len));
+}
+
+export function versionChecksumValid(buf: number[]): boolean {
+  const xor = buf.slice(0, VERSION_FRAME_SIZE - 1).reduce((a, b) => a ^ b, 0);
+  return xor === buf[VERSION_FRAME_SIZE - 1];
 }

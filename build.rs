@@ -3,11 +3,26 @@ fn main() {
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
 
+    embed_git_version();
     generate_station_ids_ts();
 
     if std::env::var("CARGO_FEATURE_USE_ENV").is_ok() {
         load_env_file();
     }
+}
+
+/// Embed git tag and commit (e.g. v1.0.1-abe59403-dirty) into the firmware.
+fn embed_git_version() {
+    let output = std::process::Command::new("git")
+        .args(["describe", "--always", "--dirty", "--tags"])
+        .output();
+    let version = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => "unknown".to_string(),
+    };
+    println!("cargo:rustc-env=GIT_VERSION={}", version);
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/index");
 }
 
 fn load_env_file() {

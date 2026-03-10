@@ -11,19 +11,28 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::String;
-use bay_wheels_controller::dprintln;
 #[cfg(not(feature = "debug-serial"))]
 use bay_wheels_controller::tasks::serial_status;
 use bay_wheels_controller::tasks::signals::BoardId;
 use bay_wheels_controller::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
+use bay_wheels_controller::{GIT_VERSION, dprintln};
 use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup, usb_serial_jtag::UsbSerialJtag};
 use esp_storage::FlashStorage;
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-esp_bootloader_esp_idf::esp_app_desc!();
+// App descriptor with git version for binary inspection (Flash tab, esptool image-info).
+esp_bootloader_esp_idf::esp_app_desc!(
+    env!("GIT_VERSION"),
+    env!("CARGO_PKG_NAME"),
+    esp_bootloader_esp_idf::BUILD_TIME,
+    esp_bootloader_esp_idf::BUILD_DATE,
+    esp_bootloader_esp_idf::ESP_IDF_COMPATIBLE_VERSION,
+    esp_bootloader_esp_idf::MMU_PAGE_SIZE,
+    0,
+    u16::MAX
+);
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -57,7 +66,7 @@ async fn main(spawner: Spawner) -> ! {
     // RTT is only needed when debug-serial is off.
     #[cfg(not(feature = "debug-serial"))]
     rtt_target::rtt_init_print!();
-    dprintln!("Starting ESP32-S3...");
+    dprintln!("Starting ESP32-S3... FW {}", GIT_VERSION);
 
     // Initialize ESP-HAL with max CPU clock
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());

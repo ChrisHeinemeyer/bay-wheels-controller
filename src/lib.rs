@@ -2,6 +2,9 @@
 
 extern crate alloc;
 
+/// Git version (tag + commit + dirty) embedded at build time, e.g. `v1.0.1-abe59403-dirty`.
+pub const GIT_VERSION: &str = env!("GIT_VERSION");
+
 pub mod logger;
 pub mod network;
 pub mod provisioning;

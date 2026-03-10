@@ -2,7 +2,16 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
 import { STATION_IDS } from "./generated/station-ids";
-import { MAGIC, FRAME_SIZE, parseFrame, checksumValid } from "./serial-frame";
+import {
+  MAGIC,
+  FRAME_SIZE,
+  VERSION_MAGIC,
+  VERSION_FRAME_SIZE,
+  parseFrame,
+  parseVersionFrame,
+  checksumValid,
+  versionChecksumValid,
+} from "./serial-frame";
 
 const NONE_OR_UNKNOWN = new Set([255, 65535]);
 
@@ -117,6 +126,7 @@ export function initStatusTab(): void {
   ) as HTMLButtonElement;
   const connLabel = document.getElementById("statusConnLabel")!;
   const display = document.getElementById("statusDisplay")!;
+  const versionEl = document.getElementById("statusVersion")!;
   const batteryVal = document.getElementById("statusBatteryVal")!;
   const batteryBar = document.getElementById("statusBatteryBar") as HTMLElement;
   const wifiDot = document.getElementById("statusWifiDot")!;
@@ -196,14 +206,27 @@ export function initStatusTab(): void {
 
   function processBytes(bytes: Uint8Array) {
     for (const b of bytes) accumulator.push(b);
-    while (accumulator.length >= FRAME_SIZE) {
-      if (accumulator[0] !== MAGIC) {
-        accumulator.shift();
-        continue;
-      }
-      if (checksumValid(accumulator)) {
-        render(parseFrame(new Uint8Array(accumulator.slice(0, FRAME_SIZE))));
-        accumulator.splice(0, FRAME_SIZE);
+    while (accumulator.length >= Math.min(FRAME_SIZE, VERSION_FRAME_SIZE)) {
+      if (
+        accumulator[0] === VERSION_MAGIC &&
+        accumulator.length >= VERSION_FRAME_SIZE
+      ) {
+        if (versionChecksumValid(accumulator)) {
+          const version = parseVersionFrame(
+            new Uint8Array(accumulator.slice(0, VERSION_FRAME_SIZE)),
+          );
+          if (version) versionEl.textContent = version;
+          accumulator.splice(0, VERSION_FRAME_SIZE);
+        } else {
+          accumulator.shift();
+        }
+      } else if (accumulator[0] === MAGIC && accumulator.length >= FRAME_SIZE) {
+        if (checksumValid(accumulator)) {
+          render(parseFrame(new Uint8Array(accumulator.slice(0, FRAME_SIZE))));
+          accumulator.splice(0, FRAME_SIZE);
+        } else {
+          accumulator.shift();
+        }
       } else {
         accumulator.shift();
       }
@@ -323,6 +346,7 @@ export function initStatusTab(): void {
       }
       accumulator = [];
       setMapHighlight(null);
+      versionEl.textContent = "--";
 
       connectBtn.style.display = "none";
       disconnectBtn.style.display = "inline";
@@ -348,6 +372,7 @@ export function initStatusTab(): void {
     display.classList.add("status-disconnected");
     accumulator = [];
     setMapHighlight(null);
+    versionEl.textContent = "--";
   };
 
   (

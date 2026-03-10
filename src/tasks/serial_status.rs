@@ -2,6 +2,7 @@ use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::Write;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 
+use crate::GIT_VERSION;
 use crate::tasks::signals::{STATUS, SystemStatus};
 
 /// Binary frame layout (49 bytes):
@@ -23,11 +24,29 @@ use crate::tasks::signals::{STATUS, SystemStatus};
 const MAGIC: u8 = 0xAB;
 const FRAME_SIZE: usize = 49;
 
+/// Magic byte for version info frame (sent once at startup).
+const VERSION_MAGIC: u8 = 0xAC;
+const VERSION_STR_LEN: usize = 32;
+const VERSION_FRAME_SIZE: usize = 1 + VERSION_STR_LEN + 1; // magic + version + checksum
+
+/// Send version frame every N status frames (~10 s) so late-connecting clients can see it.
+const VERSION_INTERVAL: u32 = 20;
+
 #[embassy_executor::task]
 pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Async>) {
     crate::dprintln!("Serial status task started!");
+    let version_frame = build_version_frame();
+    let mut frame_count: u32 = 0;
+
     loop {
         Timer::after(Duration::from_millis(500)).await;
+
+        // Advertise version at startup and periodically for late-connecting clients.
+        if frame_count % VERSION_INTERVAL == 0 {
+            let _ = with_timeout(Duration::from_millis(50), serial.write_all(&version_frame)).await;
+            let _ = with_timeout(Duration::from_millis(50), serial.flush()).await;
+        }
+        frame_count = frame_count.saturating_add(1);
 
         let frame = {
             let guard = STATUS.lock().await;
@@ -76,5 +95,17 @@ fn build_frame(s: &SystemStatus) -> [u8; FRAME_SIZE] {
     // (e.g. rssi == -85 dBm == 0xAB) and re-scan for the real frame boundary.
     buf[48] = buf[..48].iter().fold(0u8, |acc, b| acc ^ b);
 
+    buf
+}
+
+fn build_version_frame() -> [u8; VERSION_FRAME_SIZE] {
+    let mut buf = [0u8; VERSION_FRAME_SIZE];
+    buf[0] = VERSION_MAGIC;
+    let version_bytes = GIT_VERSION.as_bytes();
+    let copy_len = version_bytes.len().min(VERSION_STR_LEN);
+    buf[1..1 + copy_len].copy_from_slice(&version_bytes[..copy_len]);
+    buf[VERSION_FRAME_SIZE - 1] = buf[..VERSION_FRAME_SIZE - 1]
+        .iter()
+        .fold(0u8, |acc, b| acc ^ b);
     buf
 }

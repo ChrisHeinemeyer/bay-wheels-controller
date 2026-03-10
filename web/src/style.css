@@ -234,6 +234,11 @@ section {
   gap: 0.5rem;
 }
 
+.firmware-version {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .progress-cell {
   font-size: 0.85rem;
   color: var(--text-muted);

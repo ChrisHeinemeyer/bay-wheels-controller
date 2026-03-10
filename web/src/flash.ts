@@ -1,4 +1,5 @@
 import { ESPLoader, Transport, FlashOptions } from "esptool-js";
+import { extractFirmwareVersion } from "./firmware-version";
 
 // Resolves relative to the current page so it works in both local dev
 // (Vite proxy) and on GitHub Pages.
@@ -6,6 +7,9 @@ const FIRMWARE_URL = new URL(
   "firmware-bay-wheels-controller.bin",
   window.location.href,
 ).href;
+
+// GitHub repo for fetching latest release tag (owner/repo).
+const GITHUB_REPO = "ChrisHeinemeyer/bay-wheels-controller";
 
 const CHUNK = 8192;
 function uint8ArrayToBinaryString(arr: Uint8Array): string {
@@ -36,6 +40,8 @@ export function initFlashTab(onFlashComplete: () => void): void {
   const firmwareFile = document.getElementById(
     "firmwareFile",
   ) as HTMLInputElement;
+  const flashLatestVersion = document.getElementById("flashLatestVersion")!;
+  const flashFileVersion = document.getElementById("flashFileVersion")!;
 
   let device: SerialPort | null = null;
   let transport: Transport | null = null;
@@ -80,6 +86,9 @@ export function initFlashTab(onFlashComplete: () => void): void {
       connectButton.style.display = "none";
       disconnectButton.style.display = "inline";
       flashOptions.style.display = "block";
+      fetchLatestReleaseVersion().then((v) => {
+        flashLatestVersion.textContent = v ? `(${v})` : "";
+      });
     } catch (e) {
       log("Error: " + (e instanceof Error ? e.message : String(e)));
     }
@@ -93,9 +102,37 @@ export function initFlashTab(onFlashComplete: () => void): void {
     disconnectButton.style.display = "none";
     lblConnTo.style.display = "none";
     flashOptions.style.display = "none";
+    flashLatestVersion.textContent = "";
+    flashFileVersion.textContent = "";
     device = null;
     transport = null;
     esploader = null;
+  };
+
+  async function fetchLatestReleaseVersion(): Promise<string | null> {
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+      );
+      if (!res.ok) return null;
+      const json = (await res.json()) as { tag_name?: string };
+      return json.tag_name ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  firmwareFile.onchange = async () => {
+    flashFileVersion.textContent = "";
+    const file = firmwareFile.files?.[0];
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const version = extractFirmwareVersion(new Uint8Array(buf));
+      flashFileVersion.textContent = version ? `— ${version}` : "";
+    } catch {
+      /* ignore */
+    }
   };
 
   // ── Program ──────────────────────────────────────────────────────────────────

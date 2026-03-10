@@ -43,12 +43,14 @@
             <div class="firmware-source">
               <label
                 ><input type="radio" name="firmware" value="download" checked />
-                Use latest release from GitHub</label
-              >
+                Use latest release from GitHub
+                <span id="flashLatestVersion" class="firmware-version"></span
+              ></label>
               <label
                 ><input type="radio" name="firmware" value="file" /> Upload a
-                .bin file: <input type="file" id="firmwareFile" accept=".bin"
-              /></label>
+                .bin file: <input type="file" id="firmwareFile" accept=".bin" />
+                <span id="flashFileVersion" class="firmware-version"></span
+              ></label>
             </div>
             <div class="actions">
               <button type="button" id="programButton" class="btn btn-primary">
@@ -150,6 +152,10 @@
             <div id="statusMapContainer" class="status-map-container"></div>
           </div>
           <div class="status-sidebar">
+            <div class="status-metric">
+              <span class="status-metric-label">Firmware</span>
+              <span class="status-metric-value" id="statusVersion">--</span>
+            </div>
             <div class="status-metric">
               <span class="status-metric-label">Battery</span>
               <span class="status-metric-value" id="statusBatteryVal">--%</span>
