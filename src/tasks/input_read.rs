@@ -13,40 +13,40 @@ pub async fn input_read_task(
     loop {
         let value = shift_register.read().await;
         match value {
-            Ok(value) => {
-                let station = value_to_station(value, board_id);
+            Ok((first, second)) => {
+                let station = value_to_station(first, second, board_id);
                 STATION_SIGNAL.signal(station);
                 let mut status = STATUS.lock().await;
                 status.station_input = station;
-                status.station_input_raw = value;
+                status.station_input_row = first;
+                status.station_input_col = second;
             }
             Err(e) => {
                 crate::dprintln!("Error: {:?}", e);
             }
         }
-        Timer::after(Duration::from_millis(100)).await;
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
 
-/// Finds the first active-low bit in the shift-register `value` and maps it to
-/// a `StationIdx` using this board's entry in `BOARD_STATION_MAP`.
-/// Returns `StationIdx::None` if no input is active or the active input is not
-/// listed for this board.
-fn value_to_station(value: u16, board_id: BoardId) -> StationIdx {
+/// Maps the (row, column) from the shift register to a `StationIdx` using this
+/// board's entry in `BOARD_STATION_MAP`. First u8 = row, second u8 = column.
+/// Returns `StationIdx::None` if no input is active or the active (row, col) is
+/// not listed for this board.
+fn value_to_station(row: u8, col: u8, board_id: BoardId) -> StationIdx {
+    if row == 0xFF || col == 0xFF {
+        return StationIdx::None;
+    }
+
     let station_map = BOARD_STATION_MAP
         .iter()
         .find(|(id, _)| *id == board_id)
         .map(|(_, map)| *map)
         .unwrap_or(&[]);
 
-    for i in 0u16..16 {
-        if value & (1 << (15 - i)) == 0 {
-            return station_map
-                .iter()
-                .find(|(input, _)| *input == i)
-                .map(|(_, s)| *s)
-                .unwrap_or(StationIdx::Unknown);
-        }
-    }
-    StationIdx::None
+    station_map
+        .iter()
+        .find(|((r, c), _)| *r == row && *c == col)
+        .map(|(_, s)| *s)
+        .unwrap_or(StationIdx::Unknown)
 }

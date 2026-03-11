@@ -16,7 +16,8 @@ export interface StatusFrame {
   rssi: number;
   fetchAgeSecs: number;
   stationInput: number;
-  stationInputRaw: number;
+  stationInputRow: number;
+  stationInputCol: number;
   leds: Array<{ r: number; g: number; b: number }>;
 }
 
@@ -28,7 +29,8 @@ export function parseFrame(buf: Uint8Array): StatusFrame {
     rssi: view.getInt8(3),
     fetchAgeSecs: view.getUint32(4, true),
     stationInput: view.getUint16(8, true),
-    stationInputRaw: view.getUint16(10, true),
+    stationInputRow: buf[10],
+    stationInputCol: buf[11],
     leds: Array.from({ length: 12 }, (_, i) => ({
       r: buf[12 + i * 3],
       g: buf[12 + i * 3 + 1],

@@ -50,6 +50,7 @@ esp-radio = { version = "0.17.0", features = [
   "wifi",
   "sniffer"
 ] }
+esp-wifi-sys = { version = "0.8", features = ["esp32s3"] }
 smoltcp = { version = "0.12.0", default-features = false, features = [
   "medium-ethernet",
   "multicast",

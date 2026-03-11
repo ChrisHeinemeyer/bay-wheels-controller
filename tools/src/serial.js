@@ -14,41 +14,26 @@
 // | 11     |  1   | station_input_col (0xFF = idle)               |
 // | 12     | 36   | led_rgb — 12 × (r, g, b)                       |
 // | 48     |  1   | XOR checksum of bytes 0–47                     |
-
 const MAGIC = 0xab;
 const FRAME_SIZE = 49;
-
-/** Parsed subset of the status frame relevant to the board-mapper tool. */
-export interface StatusFrame {
-  stationInputRow: number;
-  stationInputCol: number;
-}
-
-export type FrameHandler = (frame: StatusFrame) => void;
-
 export class SerialConnection {
-  private port: SerialPort | null = null;
-  private abortController: AbortController | null = null;
-  private frameHandler: FrameHandler | null = null;
+  port = null;
+  abortController = null;
+  frameHandler = null;
   // Rolling byte buffer for framing
-  private rxBuf: number[] = [];
-
-  static isSupported(): boolean {
+  rxBuf = [];
+  static isSupported() {
     return "serial" in navigator;
   }
-
-  async connect(baudRate = 115200): Promise<void> {
+  async connect(baudRate = 115200) {
     this.port = await navigator.serial.requestPort();
     await this.port.open({ baudRate });
     this.abortController = new AbortController();
     void this.readLoop(this.abortController.signal);
   }
-
-  private async readLoop(signal: AbortSignal): Promise<void> {
+  async readLoop(signal) {
     if (!this.port?.readable) return;
-    const reader = (
-      this.port.readable as ReadableStream<Uint8Array>
-    ).getReader();
+    const reader = this.port.readable.getReader();
     try {
       while (!signal.aborted) {
         const { value, done } = await reader.read();
@@ -64,8 +49,7 @@ export class SerialConnection {
       reader.releaseLock();
     }
   }
-
-  private processBuffer(): void {
+  processBuffer() {
     // Scan for a valid frame, advancing past any false magic bytes.
     while (this.rxBuf.length >= FRAME_SIZE) {
       const magicIdx = this.rxBuf.indexOf(MAGIC);
@@ -78,7 +62,6 @@ export class SerialConnection {
         this.rxBuf.splice(0, magicIdx);
       }
       if (this.rxBuf.length < FRAME_SIZE) return;
-
       const frame = this.rxBuf.slice(0, FRAME_SIZE);
       if (checksumValid(frame)) {
         this.rxBuf.splice(0, FRAME_SIZE);
@@ -89,12 +72,10 @@ export class SerialConnection {
       }
     }
   }
-
-  onFrame(handler: FrameHandler): void {
+  onFrame(handler) {
     this.frameHandler = handler;
   }
-
-  async disconnect(): Promise<void> {
+  async disconnect() {
     this.abortController?.abort();
     this.abortController = null;
     try {
@@ -105,25 +86,21 @@ export class SerialConnection {
     this.port = null;
     this.rxBuf = [];
   }
-
-  get isConnected(): boolean {
+  get isConnected() {
     return this.port !== null;
   }
 }
-
-function checksumValid(frame: number[]): boolean {
+function checksumValid(frame) {
   const xor = frame.slice(0, FRAME_SIZE - 1).reduce((a, b) => a ^ b, 0);
   return xor === frame[FRAME_SIZE - 1];
 }
-
-function parseFrame(frame: number[]): StatusFrame {
+function parseFrame(frame) {
   return {
     stationInputRow: frame[10],
     stationInputCol: frame[11],
   };
 }
-
 /** Return true if exactly one (row, col) input is active (0xFF = idle). */
-export function isSinglePress(row: number, col: number): boolean {
+export function isSinglePress(row, col) {
   return row !== 0xff && col !== 0xff;
 }

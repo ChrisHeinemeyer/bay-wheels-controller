@@ -1,10 +1,5 @@
 import yaml from "js-yaml";
-import type { SavedSession, BoundingBox, StationMapping } from "./types";
-
-export function buildSession(
-  mappings: StationMapping[],
-  bbox: BoundingBox | null,
-): SavedSession {
+export function buildSession(mappings, bbox) {
   return {
     created_at: new Date().toISOString(),
     bounding_box: bbox,
@@ -13,16 +8,14 @@ export function buildSession(
     ),
   };
 }
-
-export function sessionToYaml(session: SavedSession): string {
+export function sessionToYaml(session) {
   return yaml.dump(session, {
     lineWidth: -1,
     sortKeys: false,
     quotingType: '"',
   });
 }
-
-export function downloadYaml(session: SavedSession): void {
+export function downloadYaml(session) {
   const content = sessionToYaml(session);
   const blob = new Blob([content], { type: "text/yaml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -32,8 +25,7 @@ export function downloadYaml(session: SavedSession): void {
   anchor.click();
   URL.revokeObjectURL(url);
 }
-
-export function promptLoadYaml(): Promise<SavedSession | null> {
+export function promptLoadYaml() {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
@@ -47,7 +39,7 @@ export function promptLoadYaml(): Promise<SavedSession | null> {
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const data = yaml.load(reader.result as string) as SavedSession;
+          const data = yaml.load(reader.result);
           resolve(data);
         } catch (e) {
           alert(`Failed to parse YAML: ${e}`);

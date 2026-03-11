@@ -1,5 +1,14 @@
 import { ESPLoader, Transport, FlashOptions } from "esptool-js";
 import { extractFirmwareVersion } from "./firmware-version";
+import {
+  VERSION_MAGIC,
+  VERSION_FRAME_SIZE,
+  MAGIC,
+  FRAME_SIZE,
+  parseVersionFrame,
+  versionChecksumValid,
+  checksumValid,
+} from "./serial-frame";
 
 // Resolves relative to the current page so it works in both local dev
 // (Vite proxy) and on GitHub Pages.
@@ -46,6 +55,30 @@ export function initFlashTab(onFlashComplete: () => void): void {
   let device: SerialPort | null = null;
   let transport: Transport | null = null;
   let esploader: ESPLoader | null = null;
+  let chipShort = "";
+  let deviceVersion: string | null = null;
+  let latestReleaseVersion: string | null = null;
+  let fileVersion: string | null = null;
+  let flashReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  function updateConnectionLabel() {
+    const chip = chipShort || "…";
+    const version =
+      deviceVersion ??
+      ((
+        document.querySelector(
+          'input[name="firmware"]:checked',
+        ) as HTMLInputElement
+      )?.value === "file"
+        ? fileVersion
+        : latestReleaseVersion);
+    lblConnTo.textContent =
+      "Connected: " + chip + (version ? ` — ${version}` : "");
+  }
+
+  document.querySelectorAll('input[name="firmware"]').forEach((el) => {
+    el.addEventListener("change", updateConnectionLabel);
+  });
 
   function log(msg: string) {
     terminal.textContent += msg + "\n";
@@ -64,6 +97,85 @@ export function initFlashTab(onFlashComplete: () => void): void {
     },
   };
 
+  function processBytes(accumulator: number[]) {
+    while (accumulator.length >= Math.min(FRAME_SIZE, VERSION_FRAME_SIZE)) {
+      if (
+        accumulator[0] === VERSION_MAGIC &&
+        accumulator.length >= VERSION_FRAME_SIZE
+      ) {
+        if (versionChecksumValid(accumulator)) {
+          const version = parseVersionFrame(
+            new Uint8Array(accumulator.slice(0, VERSION_FRAME_SIZE)),
+          );
+          if (version) {
+            deviceVersion = version;
+            updateConnectionLabel();
+          }
+          accumulator.splice(0, VERSION_FRAME_SIZE);
+        } else {
+          accumulator.shift();
+        }
+      } else if (accumulator[0] === MAGIC && accumulator.length >= FRAME_SIZE) {
+        if (checksumValid(accumulator)) {
+          accumulator.splice(0, FRAME_SIZE);
+        } else {
+          accumulator.shift();
+        }
+      } else {
+        accumulator.shift();
+      }
+    }
+  }
+
+  async function flashReadLoop(port: SerialPort) {
+    await port.open({ baudRate: 115200 });
+    const readable = port.readable;
+    if (!readable) return;
+    const reader = readable.getReader();
+    flashReader = reader;
+    const accumulator: number[] = [];
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) for (const b of value) accumulator.push(b);
+        processBytes(accumulator);
+      }
+    } catch {
+      /* port closed */
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        /* ignore */
+      }
+      flashReader = null;
+    }
+  }
+
+  async function stopFlashRead(closePort = false) {
+    if (flashReader) {
+      try {
+        await flashReader.cancel();
+      } catch {
+        /* ignore */
+      }
+      try {
+        flashReader.releaseLock();
+      } catch {
+        /* ignore */
+      }
+      flashReader = null;
+    }
+    if (closePort && device) {
+      try {
+        await device.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   // ── Connect ──────────────────────────────────────────────────────────────────
   connectButton.onclick = async () => {
     if (!("serial" in navigator)) {
@@ -72,22 +184,18 @@ export function initFlashTab(onFlashComplete: () => void): void {
     }
     try {
       device = await navigator.serial.requestPort();
-      transport = new Transport(device);
-      esploader = new ESPLoader({
-        transport,
-        baudrate: 921600,
-        romBaudrate: 115200,
-        terminal: espLoaderTerminal,
-      });
-      const chip = await esploader.main();
-
-      lblConnTo.textContent = "Connected: " + chip;
+      deviceVersion = null;
+      chipShort = "";
+      lblConnTo.textContent = "Connected: …";
       lblConnTo.style.display = "inline";
       connectButton.style.display = "none";
       disconnectButton.style.display = "inline";
       flashOptions.style.display = "block";
+      flashReadLoop(device).catch(() => {});
       fetchLatestReleaseVersion().then((v) => {
+        latestReleaseVersion = v;
         flashLatestVersion.textContent = v ? `(${v})` : "";
+        updateConnectionLabel();
       });
     } catch (e) {
       log("Error: " + (e instanceof Error ? e.message : String(e)));
@@ -97,6 +205,7 @@ export function initFlashTab(onFlashComplete: () => void): void {
   // ── Disconnect ───────────────────────────────────────────────────────────────
   disconnectButton.onclick = async () => {
     if (transport) await transport.disconnect();
+    await stopFlashRead(true);
     logClear();
     connectButton.style.display = "inline";
     disconnectButton.style.display = "none";
@@ -104,6 +213,10 @@ export function initFlashTab(onFlashComplete: () => void): void {
     flashOptions.style.display = "none";
     flashLatestVersion.textContent = "";
     flashFileVersion.textContent = "";
+    chipShort = "";
+    deviceVersion = null;
+    latestReleaseVersion = null;
+    fileVersion = null;
     device = null;
     transport = null;
     esploader = null;
@@ -124,12 +237,15 @@ export function initFlashTab(onFlashComplete: () => void): void {
 
   firmwareFile.onchange = async () => {
     flashFileVersion.textContent = "";
+    fileVersion = null;
     const file = firmwareFile.files?.[0];
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
       const version = extractFirmwareVersion(new Uint8Array(buf));
+      fileVersion = version;
       flashFileVersion.textContent = version ? `— ${version}` : "";
+      updateConnectionLabel();
     } catch {
       /* ignore */
     }
@@ -137,7 +253,19 @@ export function initFlashTab(onFlashComplete: () => void): void {
 
   // ── Program ──────────────────────────────────────────────────────────────────
   programButton.onclick = async () => {
-    if (!esploader) return;
+    if (!device) return;
+
+    await stopFlashRead(true);
+    transport = new Transport(device);
+    esploader = new ESPLoader({
+      transport,
+      baudrate: 921600,
+      romBaudrate: 115200,
+      terminal: espLoaderTerminal,
+    });
+    const chip = await esploader.main();
+    chipShort = chip.split(" (")[0] ?? chip;
+    updateConnectionLabel();
 
     const source = (
       document.querySelector(

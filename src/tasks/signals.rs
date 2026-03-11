@@ -42,8 +42,10 @@ pub struct SystemStatus {
     /// `None` until the first successful GBFS fetch completes.
     pub last_fetch_at: Option<Instant>,
     pub station_input: StationIdx,
-    /// Raw 16-bit value read from the shift register (active-low; 0xFFFF = idle).
-    pub station_input_raw: u16,
+    /// Row index (bits 0..18) from shift register; 0xFF = idle.
+    pub station_input_row: u8,
+    /// Column index (bits 18..38) from shift register; 0xFF = idle.
+    pub station_input_col: u8,
     /// (r, g, b) brightness values for each of the 12 LEDs (index = Led ordinal).
     pub led_states: [(u8, u8, u8); 12],
 }
@@ -54,6 +56,7 @@ pub static STATUS: Mutex<CriticalSectionRawMutex, SystemStatus> = Mutex::new(Sys
     rssi: 0,
     last_fetch_at: None,
     station_input: StationIdx::None,
-    station_input_raw: 0xFFFF,
+    station_input_row: 0xFF,
+    station_input_col: 0xFF,
     led_states: [(0, 0, 0); 12],
 });

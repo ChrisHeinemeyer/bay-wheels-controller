@@ -15,10 +15,8 @@ export interface BoundingBox {
 }
 
 export interface StationMapping {
-  /** 0-indexed bit position derived from raw_input (log2). */
-  bit_position: number;
-  /** Raw integer value received from the shift register. */
-  raw_input: number;
+  row: number;
+  column: number;
   station_id: string;
   station_name: string;
   lat: number;

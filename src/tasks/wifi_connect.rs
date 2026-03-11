@@ -1,8 +1,12 @@
 use alloc::string::String;
 use embassy_time::{Duration, Timer};
 use esp_radio::wifi::{AuthMethod, WifiController};
+use esp_wifi_sys::include::esp_wifi_set_max_tx_power;
 
 use crate::tasks::signals::STATUS;
+
+/// Max TX power: 84 = 21 dBm (0.25 dBm units). Helps boards with weak uplink.
+const WIFI_MAX_TX_POWER: i8 = 84;
 
 #[embassy_executor::task]
 pub async fn wifi_connect_task(
@@ -13,6 +17,19 @@ pub async fn wifi_connect_task(
     controller.set_mode(esp_radio::wifi::WifiMode::Sta).unwrap();
     controller.start().unwrap();
     crate::dprintln!("WiFi controller started!");
+
+    // Increase TX power to help boards with weak uplink (good RSSI but disconnects)
+    unsafe {
+        let ret = esp_wifi_set_max_tx_power(WIFI_MAX_TX_POWER);
+        if ret == 0 {
+            crate::dprintln!(
+                "  TX power set to max ({} dBm)",
+                WIFI_MAX_TX_POWER as i32 / 4
+            );
+        } else {
+            crate::dprintln!("  TX power set failed: {}", ret);
+        }
+    }
 
     // Scan for networks
     crate::dprintln!("Scanning for networks...");
@@ -77,9 +94,10 @@ pub async fn wifi_connect_task(
         }
     }
 
-    // Wait for connection with timeout
+    // Wait for connection with timeout. Some boards need disconnect+connect retries.
     let mut attempts = 0;
-    let max_attempts = 150; // 15 seconds
+    let max_attempts = 5000; // 500 seconds total
+    let retry_interval = 50; // Retry connect every 5 seconds
     let mut last_status = false;
 
     loop {
@@ -114,15 +132,28 @@ pub async fn wifi_connect_task(
             crate::dprintln!("  - Wrong password");
             crate::dprintln!("  - Weak signal (RSSI: {})", target_ap.signal_strength);
             crate::dprintln!("  - AP authentication issues");
+            crate::dprintln!("  - Board-specific: try power cycle or re-flash");
             panic!("WiFi connection timeout");
         }
 
-        if attempts % 10 == 0 {
+        // Retry connect periodically — some boards get stuck and need disconnect+connect
+        if attempts > 0 && attempts % retry_interval == 0 {
             crate::dprintln!(
-                "Waiting for connection... ({}s) [RSSI: {}]",
+                "Retrying connect... ({}s elapsed) [RSSI: {}]",
                 attempts / 10,
                 target_ap.signal_strength
             );
+            let _ = controller.disconnect();
+            Timer::after(Duration::from_millis(500)).await;
+            if controller.connect().is_ok() {
+                crate::dprintln!("Connect command re-sent");
+            }
+        } else if attempts % 10 == 0 {
+            // crate::dprintln!(
+            //     "Waiting for connection... ({}s) [RSSI: {}]",
+            //     attempts / 10,
+            //     target_ap.signal_strength
+            // );
         }
 
         Timer::after(Duration::from_millis(100)).await;

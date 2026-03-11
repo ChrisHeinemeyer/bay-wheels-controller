@@ -627,35 +627,76 @@ pub enum StationIdx {
 /// Covers ordinals 0–610 (`SouthLake`); `Unknown` (65534) and `None` (65535) are never used as indices.
 pub const STATION_DATA_LEN: usize = 610;
 
-/// Maps each board's shift-register bit positions (0 = first bit shifted out from MSB)
-/// to the `StationIdx` that bit represents.  Bits not listed resolve to `StationIdx::None`.
+/// Maps each board's (row, column) from the shift register to the `StationIdx` at that
+/// position. First u8 = row (bits 0..18), second u8 = column (bits 18..38).
+/// Pairs not listed resolve to `StationIdx::None`.
 ///
 /// Add a new `(BoardId::BoardN, &[...])` entry when a new board layout is defined.
-pub static BOARD_STATION_MAP: &[(BoardId, &[(u16, StationIdx)])] = &[
+pub static BOARD_STATION_MAP: &[(BoardId, &[((u8, u8), StationIdx)])] = &[
+    (
+        BoardId::Board2,
+        &[
+            ((0, 0), StationIdx::McallisterArguello),
+            ((0, 1), StationIdx::ArguelloEdward),
+            ((0, 2), StationIdx::HarrisonSeventeenthSt),
+            ((0, 3), StationIdx::ConservatoryOfFlowers),
+            ((0, 4), StationIdx::ArguelloGeary),
+            ((0, 5), StationIdx::SeventhAveCabrillo),
+            ((0, 6), StationIdx::EighthAveJfk),
+            ((0, 7), StationIdx::TurkStanyan),
+            ((0, 8), StationIdx::ParkerMcalister),
+            ((0, 9), StationIdx::FellStanyan),
+            ((0, 10), StationIdx::WallerShrader),
+            ((0, 11), StationIdx::PageMasonic),
+            ((0, 12), StationIdx::MlkSeventhAve),
+            ((0, 13), StationIdx::FrederickArguello),
+            ((0, 14), StationIdx::FifthAveAnza),
+            ((0, 15), StationIdx::SeventhAveClement),
+        ],
+    ),
     (
         BoardId::Board3,
         &[
-            (0, StationIdx::McallisterArguello),
-            (1, StationIdx::ArguelloEdward),
-            (2, StationIdx::HarrisonSeventeenthSt),
-            (3, StationIdx::ConservatoryOfFlowers),
-            (4, StationIdx::ArguelloGeary),
-            (5, StationIdx::SeventhAveCabrillo),
-            (6, StationIdx::EighthAveJfk),
-            (7, StationIdx::TurkStanyan),
-            (8, StationIdx::ParkerMcalister),
-            (9, StationIdx::FellStanyan),
-            (10, StationIdx::WallerShrader),
-            (11, StationIdx::PageMasonic),
-            (12, StationIdx::MlkSeventhAve),
-            (13, StationIdx::FrederickArguello),
-            (14, StationIdx::FifthAveAnza),
-            (15, StationIdx::SeventhAveClement),
+            ((0, 0), StationIdx::Unknown),
+            ((0, 1), StationIdx::Unknown),
+            ((0, 2), StationIdx::Unknown),
+            ((0, 3), StationIdx::Unknown),
+            ((0, 4), StationIdx::Unknown),
+            ((0, 5), StationIdx::Unknown),
+            ((1, 0), StationIdx::Unknown),
+            ((1, 1), StationIdx::Unknown),
+            ((1, 2), StationIdx::Unknown),
+            ((1, 3), StationIdx::Unknown),
+            ((1, 4), StationIdx::Unknown),
+            ((1, 5), StationIdx::Unknown),
+            ((2, 0), StationIdx::Unknown),
+            ((2, 1), StationIdx::Unknown),
+            ((2, 2), StationIdx::Unknown),
+            ((2, 3), StationIdx::Unknown),
+            ((2, 4), StationIdx::Unknown),
+            ((2, 5), StationIdx::Unknown),
+            ((3, 0), StationIdx::Unknown),
+            ((3, 1), StationIdx::Unknown),
+            ((3, 2), StationIdx::Unknown),
+            ((3, 3), StationIdx::Unknown),
+            ((3, 4), StationIdx::Unknown),
+            ((3, 5), StationIdx::Unknown),
+            ((4, 0), StationIdx::Unknown),
+            ((4, 1), StationIdx::Unknown),
+            ((4, 2), StationIdx::Unknown),
+            ((4, 3), StationIdx::Unknown),
+            ((4, 4), StationIdx::Unknown),
+            ((4, 5), StationIdx::Unknown),
+            ((5, 0), StationIdx::Unknown),
+            ((5, 1), StationIdx::Unknown),
+            ((5, 2), StationIdx::Unknown),
+            ((5, 3), StationIdx::Unknown),
+            ((5, 4), StationIdx::Unknown),
+            ((5, 5), StationIdx::Unknown),
         ],
     ),
     // (BoardId::Board0, &[ ... ]),
     // (BoardId::Board1, &[ ... ]),
-    // (BoardId::Board2, &[ ... ]),
 ];
 
 /// Maps GBFS station UUIDs to their `StationIdx` for the GBFS fetch task.

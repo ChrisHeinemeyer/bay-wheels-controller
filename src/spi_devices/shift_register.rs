@@ -30,11 +30,11 @@ impl<'d> ShiftRegister<'d> {
     }
 
     // Device-specific methods
-    pub async fn read(&mut self) -> Result<u16, ShiftRegisterError> {
+    pub async fn read(&mut self) -> Result<(u8, u8), ShiftRegisterError> {
         // Select device (CS high for active-high CS)
         self.cs.set_high();
 
-        let mut rx_buf = [0u8; 2];
+        let mut rx_buf = [0u8; 5];
         self.spi
             .read(&mut rx_buf)
             .map_err(|e| ShiftRegisterError::SpiError(e))?;
@@ -42,7 +42,29 @@ impl<'d> ShiftRegister<'d> {
         // Deselect device (CS low)
         self.cs.set_low();
 
-        Ok(rx_buf[1] as u16 | (rx_buf[0] as u16) << 8)
+        let value = rx_buf[4] as u64
+            | (rx_buf[3] as u64) << 8
+            | (rx_buf[2] as u64) << 16
+            | (rx_buf[1] as u64) << 24
+            | (rx_buf[0] as u64) << 32;
+
+        // First 18 bits: bits 39-22 (MSB). Second 20 bits: bits 19-0 (LSB).
+        // Scan each range MSB-first for first low (0).
+        let row = (0..18)
+            .find(|&i| (value >> (39 - i)) & 1 == 0)
+            .map(|i| i as u8)
+            .unwrap_or(0xFF);
+
+        let column = (0..20)
+            .find(|&i| (value >> (19 - i)) & 1 == 0)
+            .map(|i| i as u8)
+            .unwrap_or(0xFF);
+
+        // Temporary issue because not all lines are pulled up
+        let row = if row >= 6 { 0xFF } else { row };
+        let column = if column >= 6 { 0xFF } else { column };
+
+        Ok((row, column))
     }
 }
 

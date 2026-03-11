@@ -122,6 +122,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "esp-storage",
+ "esp-wifi-sys",
  "heapless 0.8.0",
  "ieee80211",
  "int-enum",

@@ -15,7 +15,8 @@ use crate::tasks::signals::{STATUS, SystemStatus};
 /// |  3     |  1   | rssi (i8 bits)                                |
 /// |  4     |  4   | fetch_age_secs LE  (u32::MAX = never)         |
 /// |  8     |  2   | station_input LE  (StationIdx ordinal as u16) |
-/// | 10     |  2   | station_input_raw LE  (raw shift register u16)|
+/// | 10     |  1   | station_input_row (0xFF = idle)                            |
+/// | 11     |  1   | station_input_col (0xFF = idle)                            |
 /// | 12     | 36   | led_rgb (12 × r,g,b)                          |
 /// | 48     |  1   | XOR checksum of bytes 0–47                    |
 ///
@@ -30,7 +31,7 @@ const VERSION_STR_LEN: usize = 32;
 const VERSION_FRAME_SIZE: usize = 1 + VERSION_STR_LEN + 1; // magic + version + checksum
 
 /// Send version frame every N status frames (~10 s) so late-connecting clients can see it.
-const VERSION_INTERVAL: u32 = 20;
+const VERSION_INTERVAL: u32 = 50;
 
 #[embassy_executor::task]
 pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Async>) {
@@ -39,7 +40,7 @@ pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Asyn
     let mut frame_count: u32 = 0;
 
     loop {
-        Timer::after(Duration::from_millis(500)).await;
+        Timer::after(Duration::from_millis(200)).await;
 
         // Advertise version at startup and periodically for late-connecting clients.
         if frame_count % VERSION_INTERVAL == 0 {
@@ -82,7 +83,8 @@ fn build_frame(s: &SystemStatus) -> [u8; FRAME_SIZE] {
     buf[4..8].copy_from_slice(&fetch_age.to_le_bytes());
 
     buf[8..10].copy_from_slice(&(s.station_input as u16).to_le_bytes());
-    buf[10..12].copy_from_slice(&s.station_input_raw.to_le_bytes());
+    buf[10] = s.station_input_row;
+    buf[11] = s.station_input_col;
 
     for i in 0..12 {
         let (r, g, b) = s.led_states[i];

@@ -1,8 +1,5 @@
 import L from "leaflet";
-import type { GbfsStation, BoundingBox } from "./types";
-
 // ── Marker style presets ───────────────────────────────────────────────────
-
 const S = {
   default: {
     fillColor: "#60a5fa",
@@ -40,13 +37,11 @@ const S = {
     fillOpacity: 0.45,
   },
 };
-
 export class MapView {
-  private readonly map: L.Map;
-  private readonly markers = new Map<string, L.CircleMarker>();
-  private readonly bboxGroup = L.layerGroup();
-
-  constructor(containerId: string) {
+  map;
+  markers = new Map();
+  bboxGroup = L.layerGroup();
+  constructor(containerId) {
     this.map = L.map(containerId, { preferCanvas: true }).setView(
       [37.77, -122.42],
       12,
@@ -58,10 +53,8 @@ export class MapView {
     }).addTo(this.map);
     this.bboxGroup.addTo(this.map);
   }
-
   // ── Station rendering ────────────────────────────────────────────────────
-
-  plotStations(stations: GbfsStation[]): void {
+  plotStations(stations) {
     for (const st of stations) {
       const m = L.circleMarker([st.lat, st.lon], { ...S.default })
         .addTo(this.map)
@@ -69,69 +62,58 @@ export class MapView {
       this.markers.set(st.station_id, m);
     }
   }
-
-  resetAll(stations: GbfsStation[]): void {
+  resetAll(stations) {
     for (const st of stations) {
       this.markers.get(st.station_id)?.setStyle({ ...S.default });
     }
   }
-
-  highlightBboxStations(stations: GbfsStation[]): void {
+  highlightBboxStations(stations) {
     for (const st of stations) {
       this.markers.get(st.station_id)?.setStyle({ ...S.inBbox });
     }
   }
-
-  setCurrentStation(station: GbfsStation): void {
+  setCurrentStation(station) {
     this.markers.get(station.station_id)?.setStyle({ ...S.current });
     this.map.panTo([station.lat, station.lon], {
       animate: true,
       duration: 0.4,
     });
   }
-
-  setStationMapped(station: GbfsStation, row: number, col: number): void {
+  setStationMapped(station, row, col) {
     const m = this.markers.get(station.station_id);
     if (!m) return;
     m.setStyle({ ...S.mapped });
     m.setTooltipContent(`[r${row} c${col}] ${station.name}`);
   }
-
-  setStationSkipped(station: GbfsStation): void {
+  setStationSkipped(station) {
     this.markers.get(station.station_id)?.setStyle({ ...S.skipped });
   }
-
   // ── Bounding box ─────────────────────────────────────────────────────────
-
   /**
    * Enter interactive bbox-draw mode.  Returns a Promise that resolves with
    * the chosen BoundingBox when the user finishes drawing.
    */
-  startBboxSelection(): Promise<BoundingBox> {
+  startBboxSelection() {
     return new Promise((resolve) => {
       const container = this.map.getContainer();
       container.style.cursor = "crosshair";
       this.map.dragging.disable();
       this.map.scrollWheelZoom.disable();
       this.bboxGroup.clearLayers();
-
-      let startLatLng: L.LatLng | null = null;
-      let tempRect: L.Rectangle | null = null;
-
-      const latLngFromEvent = (e: MouseEvent): L.LatLng => {
+      let startLatLng = null;
+      let tempRect = null;
+      const latLngFromEvent = (e) => {
         const rect = container.getBoundingClientRect();
         const pt = L.point(e.clientX - rect.left, e.clientY - rect.top);
         return this.map.containerPointToLatLng(pt);
       };
-
-      const onMouseDown = (e: MouseEvent) => {
+      const onMouseDown = (e) => {
         // Only handle left button
         if (e.button !== 0) return;
         startLatLng = latLngFromEvent(e);
         e.preventDefault();
       };
-
-      const onMouseMove = (e: MouseEvent) => {
+      const onMouseMove = (e) => {
         if (!startLatLng) return;
         const cur = latLngFromEvent(e);
         if (tempRect) this.bboxGroup.removeLayer(tempRect);
@@ -145,7 +127,6 @@ export class MapView {
         });
         this.bboxGroup.addLayer(tempRect);
       };
-
       const cleanup = () => {
         container.removeEventListener("mousedown", onMouseDown);
         document.removeEventListener("mousemove", onMouseMove);
@@ -154,17 +135,13 @@ export class MapView {
         this.map.dragging.enable();
         this.map.scrollWheelZoom.enable();
       };
-
-      const onMouseUp = (e: MouseEvent) => {
+      const onMouseUp = (e) => {
         if (!startLatLng) return;
         const end = latLngFromEvent(e);
         cleanup();
-
         if (tempRect) this.bboxGroup.removeLayer(tempRect);
-
         const bounds = L.latLngBounds(startLatLng, end);
         startLatLng = null;
-
         // Show the finalised bbox
         L.rectangle(bounds, {
           color: "#f59e0b",
@@ -172,9 +149,7 @@ export class MapView {
           fillOpacity: 0.06,
           weight: 2,
         }).addTo(this.bboxGroup);
-
         this.map.fitBounds(bounds, { padding: [30, 30] });
-
         resolve({
           north: bounds.getNorth(),
           south: bounds.getSouth(),
@@ -182,14 +157,12 @@ export class MapView {
           west: bounds.getWest(),
         });
       };
-
       container.addEventListener("mousedown", onMouseDown);
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
     });
   }
-
-  showBbox(bbox: BoundingBox): void {
+  showBbox(bbox) {
     this.bboxGroup.clearLayers();
     const bounds = L.latLngBounds(
       [bbox.south, bbox.west],
@@ -203,8 +176,7 @@ export class MapView {
     }).addTo(this.bboxGroup);
     this.map.fitBounds(bounds, { padding: [30, 30] });
   }
-
-  clearBbox(): void {
+  clearBbox() {
     this.bboxGroup.clearLayers();
   }
 }

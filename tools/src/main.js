@@ -1,67 +1,52 @@
 import "leaflet/dist/leaflet.css";
 import "./style.css";
-
 import { MapView } from "./map";
 import { SerialConnection, isSinglePress } from "./serial";
-import type { StatusFrame } from "./serial";
 import { fetchStations, stationsInBbox, sortStationsForMapping } from "./gbfs";
 import { buildSession, downloadYaml, promptLoadYaml } from "./yaml-io";
-import type { GbfsStation, BoundingBox, StationMapping } from "./types";
-
 // ── UI element helpers ────────────────────────────────────────────────────
-
-function el<T extends HTMLElement>(id: string): T {
+function el(id) {
   const e = document.getElementById(id);
   if (!e) throw new Error(`#${id} not found`);
-  return e as T;
+  return e;
 }
-
 // ── App ───────────────────────────────────────────────────────────────────
-
 class BoardMapperApp {
   // State
-  private allStations: GbfsStation[] = [];
-  private bbox: BoundingBox | null = null;
-  private queue: GbfsStation[] = []; // stations left to map in current run
-  private mappings: StationMapping[] = [];
-  private currentIdx = 0;
-
+  allStations = [];
+  bbox = null;
+  queue = []; // stations left to map in current run
+  mappings = [];
+  currentIdx = 0;
   // Resolvers for async station-flow control
-  private inputResolver: ((pos: { row: number; col: number }) => void) | null =
-    null;
-  private skipResolver: (() => void) | null = null;
-
+  inputResolver = null;
+  skipResolver = null;
   // Sub-systems
-  private readonly mapView: MapView;
-  private readonly serial: SerialConnection;
-
+  mapView;
+  serial;
   // UI refs
-  private readonly btnConnectSerial =
-    el<HTMLButtonElement>("btn-connect-serial");
-  private readonly btnLoadSession = el<HTMLButtonElement>("btn-load-session");
-  private readonly btnSelectArea = el<HTMLButtonElement>("btn-select-area");
-  private readonly btnStartMapping = el<HTMLButtonElement>("btn-start-mapping");
-  private readonly btnExport = el<HTMLButtonElement>("btn-export");
-  private readonly btnSkip = el<HTMLButtonElement>("btn-skip");
-  private readonly btnUndo = el<HTMLButtonElement>("btn-undo");
-  private readonly btnManualInput = el<HTMLButtonElement>("btn-manual-input");
-  private readonly statusBadge = el<HTMLElement>("status-badge");
-  private readonly serialBadge = el<HTMLElement>("serial-badge");
-  private readonly currentPanel = el<HTMLElement>("current-panel");
-  private readonly currentName = el<HTMLElement>("current-name");
-  private readonly currentId = el<HTMLElement>("current-id");
-  private readonly currentProgress = el<HTMLElement>("current-progress");
-  private readonly serialLog = el<HTMLElement>("serial-log");
-  private readonly mappingsList = el<HTMLElement>("mappings-list");
-  private readonly stationCount = el<HTMLElement>("station-count");
-  private readonly mappingCount = el<HTMLElement>("mapping-count");
-
+  btnConnectSerial = el("btn-connect-serial");
+  btnLoadSession = el("btn-load-session");
+  btnSelectArea = el("btn-select-area");
+  btnStartMapping = el("btn-start-mapping");
+  btnExport = el("btn-export");
+  btnSkip = el("btn-skip");
+  btnUndo = el("btn-undo");
+  btnManualInput = el("btn-manual-input");
+  statusBadge = el("status-badge");
+  serialBadge = el("serial-badge");
+  currentPanel = el("current-panel");
+  currentName = el("current-name");
+  currentId = el("current-id");
+  currentProgress = el("current-progress");
+  serialLog = el("serial-log");
+  mappingsList = el("mappings-list");
+  stationCount = el("station-count");
+  mappingCount = el("mapping-count");
   constructor() {
     this.mapView = new MapView("map");
     this.serial = new SerialConnection();
-
     this.serial.onFrame((frame) => this.handleSerialFrame(frame));
-
     this.btnConnectSerial.addEventListener(
       "click",
       () => void this.toggleSerial(),
@@ -82,7 +67,6 @@ class BoardMapperApp {
       "click",
       () => void this.promptManualInput(),
     );
-
     if (!SerialConnection.isSupported()) {
       this.serialBadge.textContent =
         "Serial: Not supported in this browser (use Chrome/Edge)";
@@ -90,8 +74,7 @@ class BoardMapperApp {
       this.btnConnectSerial.disabled = true;
     }
   }
-
-  async init(): Promise<void> {
+  async init() {
     this.setStatus("Loading stations…");
     try {
       this.allStations = await fetchStations();
@@ -105,10 +88,8 @@ class BoardMapperApp {
       this.setStatus(`Error: ${e}`, true);
     }
   }
-
   // ── Serial ───────────────────────────────────────────────────────────────
-
-  private async toggleSerial(): Promise<void> {
+  async toggleSerial() {
     if (this.serial.isConnected) {
       await this.serial.disconnect();
       this.btnConnectSerial.textContent = "Connect Serial";
@@ -121,30 +102,24 @@ class BoardMapperApp {
         this.serialBadge.textContent = "Serial: Connected";
         this.serialBadge.classList.add("badge--ok");
       } catch (e) {
-        if ((e as Error).name !== "NotFoundError") {
+        if (e.name !== "NotFoundError") {
           this.logSerial(`Connection error: ${e}`);
         }
       }
     }
   }
-
-  private handleSerialFrame(frame: StatusFrame): void {
+  handleSerialFrame(frame) {
     const { stationInputRow: row, stationInputCol: col } = frame;
-
     // Idle — nothing pressed
     if (row === 0xff && col === 0xff) return;
-
     this.logSerial(`raw=r${row} c${col}`);
-
     if (!this.inputResolver) return;
-
     if (!isSinglePress(row, col)) {
       this.logSerial(
         `⚠ Invalid input (r${row} c${col}) — release all and try again`,
       );
       return;
     }
-
     const existing = this.mappings.find(
       (m) => m.row === row && m.column === col,
     );
@@ -154,27 +129,24 @@ class BoardMapperApp {
       );
       return;
     }
-
     const resolver = this.inputResolver;
     this.inputResolver = null;
     this.skipResolver = null;
     resolver({ row, col });
   }
-
   // ── Session load ─────────────────────────────────────────────────────────
-
-  private migrateMapping(m: unknown): StationMapping | null {
-    const o = m as Record<string, unknown>;
+  migrateMapping(m) {
+    const o = m;
     if (!o || typeof o !== "object") return null;
     // New format
     if ("row" in o && "column" in o) {
-      return o as unknown as StationMapping;
+      return o;
     }
     // Legacy: bit_position 0-15 → row=0, col=bit_position
     if ("bit_position" in o && typeof o.bit_position === "number") {
       return {
         row: 0,
-        column: o.bit_position as number,
+        column: o.bit_position,
         station_id: String(o.station_id ?? ""),
         station_name: String(o.station_name ?? ""),
         lat: Number(o.lat ?? 0),
@@ -183,47 +155,38 @@ class BoardMapperApp {
     }
     return null;
   }
-
-  private async loadSession(): Promise<void> {
+  async loadSession() {
     const session = await promptLoadYaml();
     if (!session) return;
-
     const raw = session.mappings ?? [];
     this.mappings = raw
       .map((m) => this.migrateMapping(m))
-      .filter((m): m is StationMapping => m !== null);
+      .filter((m) => m !== null);
     if (session.bounding_box) {
       this.bbox = session.bounding_box;
       this.mapView.showBbox(this.bbox);
-
       const inBox = stationsInBbox(this.allStations, this.bbox);
       this.mapView.highlightBboxStations(inBox);
       this.stationCount.textContent = String(inBox.length);
       this.btnStartMapping.disabled = false;
     }
-
     // Render previously-recorded mappings on the map
     for (const m of this.mappings) {
       const st = this.allStations.find((s) => s.station_id === m.station_id);
       if (st) this.mapView.setStationMapped(st, m.row, m.column);
     }
-
     this.refreshMappingsList();
     this.setStatus(
       `Session loaded: ${this.mappings.length} mappings restored.`,
     );
   }
-
   // ── Area selection ───────────────────────────────────────────────────────
-
-  private async selectArea(): Promise<void> {
+  async selectArea() {
     this.setStatus("Draw a rectangle on the map to select your area…");
     this.btnSelectArea.disabled = true;
-
     // Reset any previous bbox highlights
     this.mapView.resetAll(this.allStations);
     this.mapView.clearBbox();
-
     this.bbox = await this.mapView.startBboxSelection();
     const filtered = stationsInBbox(this.allStations, this.bbox);
     this.stationCount.textContent = String(filtered.length);
@@ -236,55 +199,43 @@ class BoardMapperApp {
         : "No stations in selected area. Try a different area.",
     );
   }
-
   // ── Mapping flow ─────────────────────────────────────────────────────────
-
-  private async startMapping(): Promise<void> {
+  async startMapping() {
     if (!this.bbox) return;
-
     const inBox = stationsInBbox(this.allStations, this.bbox);
     const alreadyMapped = new Set(this.mappings.map((m) => m.station_id));
     const remaining = sortStationsForMapping(
       inBox.filter((s) => !alreadyMapped.has(s.station_id)),
     );
-
     if (remaining.length === 0) {
       this.setStatus("All stations in this area are already mapped!");
       return;
     }
-
     this.queue = remaining;
     this.currentIdx = 0;
-
     this.btnStartMapping.disabled = true;
     this.btnSelectArea.disabled = true;
     this.btnLoadSession.disabled = true;
     this.btnSkip.disabled = false;
     this.btnManualInput.disabled = false;
     this.currentPanel.hidden = false;
-
     await this.runMappingLoop();
-
     this.btnStartMapping.disabled = false;
     this.btnSelectArea.disabled = false;
     this.btnLoadSession.disabled = false;
     this.btnSkip.disabled = true;
     this.btnManualInput.disabled = true;
     this.currentPanel.hidden = true;
-
     this.setStatus(
       `Done! ${this.mappings.length} total mappings. Export YAML when ready.`,
     );
     this.btnExport.disabled = this.mappings.length === 0;
   }
-
-  private async runMappingLoop(): Promise<void> {
+  async runMappingLoop() {
     const total = this.queue.length;
-
     for (let i = 0; i < this.queue.length; i++) {
       const station = this.queue[i];
       this.currentIdx = i;
-
       // Update UI
       this.currentName.textContent = station.name;
       this.currentId.textContent = station.station_id;
@@ -292,17 +243,14 @@ class BoardMapperApp {
       this.setStatus(`Touch the pad for: ${station.name}`);
       this.mapView.setCurrentStation(station);
       this.btnUndo.disabled = this.mappings.length === 0;
-
       const result = await this.waitForInputOrSkip();
-
       if (result === "skip") {
         this.mapView.setStationSkipped(station);
         this.logSerial(`— Skipped: ${station.name}`);
         continue;
       }
-
       const { row, col } = result;
-      const mapping: StationMapping = {
+      const mapping = {
         row,
         column: col,
         station_id: station.station_id,
@@ -316,8 +264,7 @@ class BoardMapperApp {
       this.refreshMappingsList();
     }
   }
-
-  private waitForInputOrSkip(): Promise<{ row: number; col: number } | "skip"> {
+  waitForInputOrSkip() {
     return new Promise((resolve) => {
       this.inputResolver = (pos) => {
         this.skipResolver = null;
@@ -329,13 +276,11 @@ class BoardMapperApp {
       };
     });
   }
-
-  private skipStation(): void {
+  skipStation() {
     this.skipResolver?.();
     this.skipResolver = null;
   }
-
-  private async promptManualInput(): Promise<void> {
+  async promptManualInput() {
     const input = prompt("Enter row,column (e.g. 0,5 or 2,3):");
     if (input === null) return;
     const trimmed = input.trim();
@@ -360,39 +305,32 @@ class BoardMapperApp {
     }
     this.handleSerialFrame({ stationInputRow: row, stationInputCol: col });
   }
-
-  private undoLast(): void {
+  undoLast() {
     if (this.mappings.length === 0) return;
-    const last = this.mappings.pop()!;
+    const last = this.mappings.pop();
     const st = this.allStations.find((s) => s.station_id === last.station_id);
     if (st) this.mapView.highlightBboxStations([st]);
     this.refreshMappingsList();
     this.logSerial(
       `↩ Undid mapping for "${last.station_name}" [r${last.row} c${last.column}]`,
     );
-
     // Put the station back in front of the queue so we revisit it
     const inQueue = this.queue.some((s) => s.station_id === last.station_id);
     if (!inQueue && st) {
       this.queue.splice(this.currentIdx, 0, st);
     }
   }
-
   // ── Export ───────────────────────────────────────────────────────────────
-
-  private exportYaml(): void {
+  exportYaml() {
     const session = buildSession(this.mappings, this.bbox);
     downloadYaml(session);
   }
-
   // ── UI helpers ────────────────────────────────────────────────────────────
-
-  private setStatus(msg: string, error = false): void {
+  setStatus(msg, error = false) {
     this.statusBadge.textContent = msg;
     this.statusBadge.classList.toggle("badge--error", error);
   }
-
-  private logSerial(line: string): void {
+  logSerial(line) {
     const entry = document.createElement("div");
     entry.className = "log-entry";
     entry.textContent = `[${new Date().toLocaleTimeString()}] ${line}`;
@@ -402,12 +340,10 @@ class BoardMapperApp {
       this.serialLog.lastElementChild?.remove();
     }
   }
-
-  private refreshMappingsList(): void {
+  refreshMappingsList() {
     this.mappingCount.textContent = String(this.mappings.length);
     this.btnExport.disabled = this.mappings.length === 0;
     this.btnUndo.disabled = this.mappings.length === 0;
-
     this.mappingsList.innerHTML = "";
     const sorted = [...this.mappings].sort(
       (a, b) => a.row - b.row || a.column - b.column,
@@ -427,7 +363,6 @@ class BoardMapperApp {
     }
   }
 }
-
 // ── Bootstrap ─────────────────────────────────────────────────────────────
 const app = new BoardMapperApp();
 void app.init();
