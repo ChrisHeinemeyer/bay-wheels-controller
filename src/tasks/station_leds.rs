@@ -50,8 +50,7 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
     }
 }
 
-const EBIKE_LEDS: [Led; 6] = [
-    Led::Led0,
+const EBIKE_LEDS: [Led; 5] = [
     Led::Led1,
     Led::Led2,
     Led::Led3,
@@ -62,14 +61,16 @@ const EBIKE_LEDS: [Led; 6] = [
 const EBIKE_COLOR: Color = Color { r: 0, g: 255, b: 0 }; // Green
 const MECHANICAL_BIKE_COLOR: Color = Color { r: 0, g: 0, b: 255 }; // Blue
 
-const MECHANICAL_BIKE_LEDS: [Led; 6] = [
-    Led::Led11,
+const MECHANICAL_BIKE_LEDS: [Led; 5] = [
     Led::Led10,
     Led::Led9,
     Led::Led8,
     Led::Led7,
-    Led::Led6,
+    Led::Led0,
 ];
+
+const STATION_EMPTY_LEDS: [Led; 1] = [Led::Led6];
+const STATION_EMPTY_COLOR: Color = Color { r: 255, g: 0, b: 0 }; // Red
 
 pub const MAX_LEDS: usize = 12;
 
@@ -80,26 +81,26 @@ fn get_leds(
     let mut leds = Vec::new();
     // Index directly by ordinal — O(1) lookup.
     let station = &station_data[station_idx as usize];
-    for led in 0..min(station.num_ebikes_available, EBIKE_LEDS.len() as u8) {
-        let _ = match leds.push((EBIKE_LEDS[led as usize], EBIKE_COLOR)) {
-            Ok(()) => true,
-            Err(e) => {
-                crate::dprintln!("Error pushing ebike led: {:?}", e);
-                false
+    if station.num_ebikes_available == 0 && station.num_bikes_available == 0 {
+        for &led in STATION_EMPTY_LEDS.iter() {
+            if leds.push((led, STATION_EMPTY_COLOR)).is_err() {
+                crate::dprintln!("Error pushing station empty led");
             }
-        };
-    }
-    for led in 0..min(
-        station.num_bikes_available,
-        MECHANICAL_BIKE_LEDS.len() as u8,
-    ) {
-        let _ = match leds.push((MECHANICAL_BIKE_LEDS[led as usize], MECHANICAL_BIKE_COLOR)) {
-            Ok(()) => true,
-            Err(e) => {
-                crate::dprintln!("Error pushing mech bike led: {:?}", e);
-                false
+        }
+    } else {
+        for led in 0..min(station.num_ebikes_available as usize, EBIKE_LEDS.len()) {
+            if leds.push((EBIKE_LEDS[led], EBIKE_COLOR)).is_err() {
+                crate::dprintln!("Error pushing ebike led");
             }
-        };
+        }
+        for led in 0..min(
+            station.num_bikes_available as usize,
+            MECHANICAL_BIKE_LEDS.len(),
+        ) {
+            if leds.push((MECHANICAL_BIKE_LEDS[led], MECHANICAL_BIKE_COLOR)).is_err() {
+                crate::dprintln!("Error pushing mech bike led");
+            }
+        }
     }
     leds
 }

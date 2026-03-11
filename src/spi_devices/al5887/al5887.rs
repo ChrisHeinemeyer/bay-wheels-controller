@@ -130,8 +130,7 @@ impl<'d> Al5887<'d> {
         brightness: u8,
         color: Color,
     ) -> Result<(), Al5887Error> {
-        // Because of a wiring but, we need to write the color in the opposite order
-        let color = Color::new(color.b, color.g, color.r);
+        let color = Color::new(color.r, color.g, color.b);
         let spi_frames = SpiFrame::set_led_brightness_color(led, brightness, color);
         self.write_register(spi_frames[0]).await?;
         self.write_register(spi_frames[1]).await?;
