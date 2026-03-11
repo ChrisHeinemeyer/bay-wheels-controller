@@ -10,12 +10,15 @@ import {
   checksumValid,
 } from "./serial-frame";
 
+// Resolves relative to the current page so it works in both local dev
+// (Vite proxy) and on GitHub Pages (bundled at deploy).
+const FIRMWARE_URL = new URL(
+  "firmware-bay-wheels-controller.bin",
+  window.location.href,
+).href;
+
 // GitHub repo for fetching latest release tag (owner/repo).
 const GITHUB_REPO = "ChrisHeinemeyer/bay-wheels-controller";
-
-// Always fetch firmware directly from GitHub releases so users get the latest.
-const FIRMWARE_URL =
-  "https://github.com/ChrisHeinemeyer/bay-wheels-controller/releases/latest/download/firmware-bay-wheels-controller.bin";
 
 const CHUNK = 8192;
 function uint8ArrayToBinaryString(arr: Uint8Array): string {
