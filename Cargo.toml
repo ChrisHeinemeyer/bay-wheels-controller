@@ -10,7 +10,7 @@ use-env = []
 edition      = "2024"
 name         = "bay-wheels-controller"
 rust-version = "1.88"
-version      = "0.1.0"
+version      = "1.0.0"
 
 [[bin]]
 name = "bay-wheels-controller"

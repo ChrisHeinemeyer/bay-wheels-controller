@@ -72,7 +72,10 @@ async function fetchStationsWithCoords(): Promise<GbfsStation[]> {
   throw new Error("Could not fetch GBFS station_information");
 }
 
-const LED_GRID_ORDER = [0, 1, 2, 3, 4, 5, 11, 10, 9, 8, 7, 6];
+// Matches firmware: row 1 = eBikes (1–5) + Led11, row 2 = mechanical (10,9,8,7,0), row 3 = empty (6, red)
+const LED_ROW_1 = [1, 2, 3, 4, 5];
+const LED_ROW_2 = [10, 9, 8, 7, 0];
+const LED_ROW_3 = [6];
 
 // Maki marker SVG (https://github.com/mapbox/maki/blob/main/icons/marker.svg)
 // Single closed path — solid fill. iconAnchor = bottom center, pin tip at station coordinate
@@ -190,19 +193,20 @@ export function initStatusTab(): void {
     }
   }
 
-  // ── LED grid (rendered once at init) ─────────────────────────────────────────
-  for (const idx of LED_GRID_ORDER) {
-    const wrap = document.createElement("div");
-    const circle = document.createElement("div");
-    circle.className = "led-circle";
-    circle.id = `led-${idx}`;
-    circle.style.backgroundColor = "rgb(20,20,20)";
-    const label = document.createElement("div");
-    label.className = "led-label";
-    label.textContent = String(idx);
-    wrap.appendChild(circle);
-    wrap.appendChild(label);
-    ledsEl.appendChild(wrap);
+  // ── LED grid (rendered once at init, 3 explicit rows) ────────────────────────
+  for (const rowLeds of [LED_ROW_1, LED_ROW_2, LED_ROW_3]) {
+    const rowEl = document.createElement("div");
+    rowEl.className = "led-row";
+    for (const idx of rowLeds) {
+      const wrap = document.createElement("div");
+      const circle = document.createElement("div");
+      circle.className = "led-circle";
+      circle.id = `led-${idx}`;
+      circle.style.backgroundColor = "rgb(20,20,20)";
+      wrap.appendChild(circle);
+      rowEl.appendChild(wrap);
+    }
+    ledsEl.appendChild(rowEl);
   }
 
   function processBytes(bytes: Uint8Array) {

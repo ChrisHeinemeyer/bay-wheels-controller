@@ -50,24 +50,12 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
     }
 }
 
-const EBIKE_LEDS: [Led; 5] = [
-    Led::Led1,
-    Led::Led2,
-    Led::Led3,
-    Led::Led4,
-    Led::Led5,
-];
+const EBIKE_LEDS: [Led; 5] = [Led::Led1, Led::Led2, Led::Led3, Led::Led4, Led::Led5];
 
 const EBIKE_COLOR: Color = Color { r: 0, g: 255, b: 0 }; // Green
 const MECHANICAL_BIKE_COLOR: Color = Color { r: 0, g: 0, b: 255 }; // Blue
 
-const MECHANICAL_BIKE_LEDS: [Led; 5] = [
-    Led::Led10,
-    Led::Led9,
-    Led::Led8,
-    Led::Led7,
-    Led::Led0,
-];
+const MECHANICAL_BIKE_LEDS: [Led; 5] = [Led::Led10, Led::Led9, Led::Led8, Led::Led7, Led::Led0];
 
 const STATION_EMPTY_LEDS: [Led; 1] = [Led::Led6];
 const STATION_EMPTY_COLOR: Color = Color { r: 255, g: 0, b: 0 }; // Red
@@ -97,7 +85,10 @@ fn get_leds(
             station.num_bikes_available as usize,
             MECHANICAL_BIKE_LEDS.len(),
         ) {
-            if leds.push((MECHANICAL_BIKE_LEDS[led], MECHANICAL_BIKE_COLOR)).is_err() {
+            if leds
+                .push((MECHANICAL_BIKE_LEDS[led], MECHANICAL_BIKE_COLOR))
+                .is_err()
+            {
                 crate::dprintln!("Error pushing mech bike led");
             }
         }
