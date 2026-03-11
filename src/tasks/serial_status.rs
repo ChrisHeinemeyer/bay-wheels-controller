@@ -5,7 +5,7 @@ use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use crate::GIT_VERSION;
 use crate::tasks::signals::{STATUS, SystemStatus};
 
-/// Binary frame layout (49 bytes):
+/// Binary frame layout (50 bytes):
 ///
 /// | Offset | Size | Field                                         |
 /// |--------|------|-----------------------------------------------|
@@ -15,15 +15,16 @@ use crate::tasks::signals::{STATUS, SystemStatus};
 /// |  3     |  1   | rssi (i8 bits)                                |
 /// |  4     |  4   | fetch_age_secs LE  (u32::MAX = never)         |
 /// |  8     |  2   | station_input LE  (StationIdx ordinal as u16) |
-/// | 10     |  1   | station_input_row (0xFF = idle)                            |
-/// | 11     |  1   | station_input_col (0xFF = idle)                            |
-/// | 12     | 36   | led_rgb (12 × r,g,b)                          |
-/// | 48     |  1   | XOR checksum of bytes 0–47                    |
+/// | 10     |  1   | station_input_row (0xFF = idle)               |
+/// | 11     |  1   | station_input_col (0xFF = idle)               |
+/// | 12     |  1   | board_id (0=Board0, 1=Board1, 2=Board2, 3=Board3) |
+/// | 13     | 36   | led_rgb (12 × r,g,b)                          |
+/// | 49     |  1   | XOR checksum of bytes 0–48                    |
 ///
 /// The checksum allows the receiver to detect a false magic byte (e.g. rssi == -85 == 0xAB)
 /// and re-scan for the real frame boundary.
 const MAGIC: u8 = 0xAB;
-const FRAME_SIZE: usize = 49;
+const FRAME_SIZE: usize = 50;
 
 /// Magic byte for version info frame (sent once at startup).
 const VERSION_MAGIC: u8 = 0xAC;
@@ -83,19 +84,20 @@ fn build_frame(s: &SystemStatus) -> [u8; FRAME_SIZE] {
     buf[4..8].copy_from_slice(&fetch_age.to_le_bytes());
 
     buf[8..10].copy_from_slice(&(s.station_input as u16).to_le_bytes());
-    buf[10] = s.station_input_row;
-    buf[11] = s.station_input_col;
+    buf[10] = s.station_input_row.0;
+    buf[11] = s.station_input_col.0;
+    buf[12] = s.board_id as u8;
 
     for i in 0..12 {
         let (r, g, b) = s.led_states[i];
-        buf[12 + i * 3] = r;
-        buf[12 + i * 3 + 1] = g;
-        buf[12 + i * 3 + 2] = b;
+        buf[13 + i * 3] = r;
+        buf[13 + i * 3 + 1] = g;
+        buf[13 + i * 3 + 2] = b;
     }
 
     // XOR checksum of all data bytes — lets the receiver detect a false magic byte
     // (e.g. rssi == -85 dBm == 0xAB) and re-scan for the real frame boundary.
-    buf[48] = buf[..48].iter().fold(0u8, |acc, b| acc ^ b);
+    buf[49] = buf[..49].iter().fold(0u8, |acc, b| acc ^ b);
 
     buf
 }

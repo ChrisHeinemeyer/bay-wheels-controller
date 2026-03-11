@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "board-map": "node scripts/board-mapping-to-station-map.js"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

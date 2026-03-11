@@ -1,5 +1,6 @@
 use embassy_time::{Duration, Timer};
 
+use crate::grid::{Column, Row};
 use crate::spi_devices;
 use crate::stations::{BOARD_STATION_MAP, StationIdx};
 use crate::tasks::signals::{BoardId, STATION_SIGNAL, STATUS};
@@ -13,13 +14,13 @@ pub async fn input_read_task(
     loop {
         let value = shift_register.read().await;
         match value {
-            Ok((first, second)) => {
-                let station = value_to_station(first, second, board_id);
+            Ok((row, col)) => {
+                let station = value_to_station(row, col, board_id);
                 STATION_SIGNAL.signal(station);
                 let mut status = STATUS.lock().await;
                 status.station_input = station;
-                status.station_input_row = first;
-                status.station_input_col = second;
+                status.station_input_row = row;
+                status.station_input_col = col;
             }
             Err(e) => {
                 crate::dprintln!("Error: {:?}", e);
@@ -30,11 +31,11 @@ pub async fn input_read_task(
 }
 
 /// Maps the (row, column) from the shift register to a `StationIdx` using this
-/// board's entry in `BOARD_STATION_MAP`. First u8 = row, second u8 = column.
+/// board's entry in `BOARD_STATION_MAP`.
 /// Returns `StationIdx::None` if no input is active or the active (row, col) is
 /// not listed for this board.
-fn value_to_station(row: u8, col: u8, board_id: BoardId) -> StationIdx {
-    if row == 0xFF || col == 0xFF {
+fn value_to_station(row: Row, col: Column, board_id: BoardId) -> StationIdx {
+    if row == Row::IDLE || col == Column::IDLE {
         return StationIdx::None;
     }
 

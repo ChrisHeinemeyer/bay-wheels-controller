@@ -1,10 +1,10 @@
 // ── Frame protocol ────────────────────────────────────────────────────────────
 //
 // Version frame (34 bytes): sent once at startup. Magic 0xAC, 32-byte UTF-8 version, XOR checksum.
-// Status frame (49 bytes): emitted every 500 ms. See src/tasks/serial_status.rs for layout.
+// Status frame (50 bytes): emitted every 500 ms. See src/tasks/serial_status.rs for layout.
 
 export const MAGIC = 0xab;
-export const FRAME_SIZE = 49;
+export const FRAME_SIZE = 50;
 
 export const VERSION_MAGIC = 0xac;
 const VERSION_STR_LEN = 32;
@@ -18,6 +18,7 @@ export interface StatusFrame {
   stationInput: number;
   stationInputRow: number;
   stationInputCol: number;
+  boardId: number;
   leds: Array<{ r: number; g: number; b: number }>;
 }
 
@@ -31,10 +32,11 @@ export function parseFrame(buf: Uint8Array): StatusFrame {
     stationInput: view.getUint16(8, true),
     stationInputRow: buf[10],
     stationInputCol: buf[11],
+    boardId: buf[12],
     leds: Array.from({ length: 12 }, (_, i) => ({
-      r: buf[12 + i * 3],
-      g: buf[12 + i * 3 + 1],
-      b: buf[12 + i * 3 + 2],
+      r: buf[13 + i * 3],
+      g: buf[13 + i * 3 + 1],
+      b: buf[13 + i * 3 + 2],
     })),
   };
 }

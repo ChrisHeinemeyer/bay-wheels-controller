@@ -13,7 +13,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 #[cfg(not(feature = "debug-serial"))]
 use bay_wheels_controller::tasks::serial_status;
-use bay_wheels_controller::tasks::signals::BoardId;
+use bay_wheels_controller::tasks::signals::{BoardId, STATUS};
 use bay_wheels_controller::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
 use bay_wheels_controller::{GIT_VERSION, dprintln};
 use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
@@ -200,6 +200,8 @@ async fn main(spawner: Spawner) -> ! {
         id
         // gpio37 and gpio38 are dropped here — GPIO pins freed
     };
+
+    STATUS.lock().await.board_id = board_id;
 
     let shift_register = spi_devices::shift_register::ShiftRegister::new(
         peripherals.SPI2,

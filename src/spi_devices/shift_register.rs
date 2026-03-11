@@ -4,6 +4,8 @@ use esp_hal::{
     time::Rate,
 };
 
+use crate::grid::{Column, Row};
+
 pub struct ShiftRegister<'d> {
     spi: Spi<'d, Blocking>,
     cs: gpio::Output<'d>,
@@ -30,7 +32,7 @@ impl<'d> ShiftRegister<'d> {
     }
 
     // Device-specific methods
-    pub async fn read(&mut self) -> Result<(u8, u8), ShiftRegisterError> {
+    pub async fn read(&mut self) -> Result<(Row, Column), ShiftRegisterError> {
         // Select device (CS high for active-high CS)
         self.cs.set_high();
 
@@ -50,19 +52,23 @@ impl<'d> ShiftRegister<'d> {
 
         // First 18 bits: bits 39-22 (MSB). Second 20 bits: bits 19-0 (LSB).
         // Scan each range MSB-first for first low (0).
-        let row = (0..18)
+        let column = (0..18)
             .find(|&i| (value >> (39 - i)) & 1 == 0)
             .map(|i| i as u8)
             .unwrap_or(0xFF);
 
-        let column = (0..20)
+        let row = (0..20)
             .find(|&i| (value >> (19 - i)) & 1 == 0)
             .map(|i| i as u8)
             .unwrap_or(0xFF);
 
         // Temporary issue because not all lines are pulled up
-        let row = if row >= 6 { 0xFF } else { row };
-        let column = if column >= 6 { 0xFF } else { column };
+        let row = if row >= 6 { Row::IDLE } else { Row(row) };
+        let column = if column >= 6 {
+            Column::IDLE
+        } else {
+            Column(column)
+        };
 
         Ok((row, column))
     }

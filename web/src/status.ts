@@ -127,6 +127,7 @@ export function initStatusTab(): void {
   const connLabel = document.getElementById("statusConnLabel")!;
   const display = document.getElementById("statusDisplay")!;
   const versionEl = document.getElementById("statusVersion")!;
+  const boardIdEl = document.getElementById("statusBoardId")!;
   const batteryVal = document.getElementById("statusBatteryVal")!;
   const batteryBar = document.getElementById("statusBatteryBar") as HTMLElement;
   const wifiDot = document.getElementById("statusWifiDot")!;
@@ -233,8 +234,16 @@ export function initStatusTab(): void {
     }
   }
 
+  const BOARD_ID_LABELS = ["Board 0", "Board 1", "Board 2", "Board 3"] as const;
+
   function render(frame: ReturnType<typeof parseFrame>) {
     display.style.display = "";
+
+    // Board ID
+    boardIdEl.textContent =
+      frame.boardId < 4
+        ? BOARD_ID_LABELS[frame.boardId]
+        : `Board ${frame.boardId}`;
 
     // Battery
     const pct = frame.batteryPct;
@@ -347,6 +356,7 @@ export function initStatusTab(): void {
       accumulator = [];
       setMapHighlight(null);
       versionEl.textContent = "--";
+      boardIdEl.textContent = "--";
 
       connectBtn.style.display = "none";
       disconnectBtn.style.display = "inline";
@@ -373,6 +383,7 @@ export function initStatusTab(): void {
     accumulator = [];
     setMapHighlight(null);
     versionEl.textContent = "--";
+    boardIdEl.textContent = "--";
   };
 
   (
