@@ -647,7 +647,7 @@ pub static BOARD_STATION_MAP: &[(BoardId, &[((Row, Column), StationIdx)])] = &[
             ((Row(1), Column(1)), StationIdx::ArguelloEdward),
             ((Row(1), Column(2)), StationIdx::TurkBlvdStanyanSt),
             ((Row(1), Column(3)), StationIdx::AnzaStCollinsSt),
-            ((Row(1), Column(4)), StationIdx::OfarrellStDivisaderoSt),
+            ((Row(1), Column(4)), StationIdx::McallisterStBakerSt),
             ((Row(1), Column(5)), StationIdx::GroveStDivisadero),
             ((Row(2), Column(0)), StationIdx::SeventhAveCabrillo),
             ((Row(2), Column(1)), StationIdx::McallisterArguello),

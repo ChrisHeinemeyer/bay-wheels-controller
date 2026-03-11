@@ -26,7 +26,7 @@ pub async fn input_read_task(
                 crate::dprintln!("Error: {:?}", e);
             }
         }
-        Timer::after(Duration::from_millis(500)).await;
+        Timer::after(Duration::from_millis(100)).await;
     }
 }
 
