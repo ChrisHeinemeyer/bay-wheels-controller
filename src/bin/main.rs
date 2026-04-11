@@ -14,7 +14,7 @@ use alloc::string::String;
 #[cfg(not(feature = "debug-serial"))]
 use bay_wheels_controller::tasks::serial_status;
 use bay_wheels_controller::tasks::signals::{BoardId, STATUS};
-use bay_wheels_controller::tasks::{battery, blink, fetch, input_read, station_leds, wifi_connect};
+use bay_wheels_controller::tasks::{battery, fetch, input_read, station_leds, wifi_connect};
 use bay_wheels_controller::{GIT_VERSION, dprintln};
 use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 use embassy_executor::Spawner;
@@ -158,31 +158,6 @@ async fn main(spawner: Spawner) -> ! {
     // Setup WiFi sniffer
     wifi::setup_sniffer(interfaces.sniffer);
 
-    // Setup LED on GPIO15
-    let led_pin = gpio::Output::new(
-        peripherals.GPIO4,
-        gpio::Level::Low,
-        gpio::OutputConfig::default(),
-    );
-    let clock_cfg =
-        esp_hal::mcpwm::PeripheralClockConfig::with_frequency(esp_hal::time::Rate::from_mhz(40))
-            .unwrap();
-    let mut mcpwm = esp_hal::mcpwm::McPwm::new(peripherals.MCPWM0, clock_cfg);
-    mcpwm.operator0.set_timer(&mcpwm.timer0);
-    let pwm_pin = mcpwm.operator0.with_pin_a(
-        led_pin,
-        esp_hal::mcpwm::operator::PwmPinConfig::UP_ACTIVE_HIGH,
-    );
-
-    let timer_clock_cfg = clock_cfg
-        .timer_clock_with_frequency(
-            99,
-            esp_hal::mcpwm::timer::PwmWorkingMode::Increase,
-            esp_hal::time::Rate::from_khz(20),
-        )
-        .unwrap();
-    mcpwm.timer0.start(timer_clock_cfg);
-
     // Read the two-bit board ID from GPIO37 (bit 0) and GPIO38 (bit 1).
     // Both pins are pulled up internally; a resistor to GND grounds a bit.
     // Current board (no resistors) reads 0b11 = Board3.
@@ -206,10 +181,11 @@ async fn main(spawner: Spawner) -> ! {
 
     let analog_pin = peripherals.GPIO5;
     let mut adc1_config = AdcConfig::new();
-    let pin = adc1_config.enable_pin_with_cal::<_, AdcCalLine<esp_hal::peripherals::ADC1<'static>>>(
-        analog_pin,
-        Attenuation::_2p5dB,
-    );
+    let pin = adc1_config
+        .enable_pin_with_cal::<_, AdcCalLine<esp_hal::peripherals::ADC1<'static>>>(
+            analog_pin,
+            Attenuation::_2p5dB,
+        );
     let adc1 = Adc::new(peripherals.ADC1, adc1_config);
 
     let shift_register = spi_devices::shift_register::ShiftRegister::new(
@@ -265,9 +241,6 @@ async fn main(spawner: Spawner) -> ! {
 
     // Spawn tasks
     dprintln!("Spawning tasks...");
-    spawner
-        .spawn(blink::blink_task(pwm_pin))
-        .expect("Failed to spawn blink_task");
     spawner
         .spawn(battery::battery_task(adc1, pin))
         .expect("Failed to spawn battery_task");

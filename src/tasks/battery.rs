@@ -30,6 +30,5 @@ fn convert_to_percentage(adc_mv: u16) -> u8 {
     // 3× AA alkaline: ~3000 mV depleted → ~4500 mV fresh
     let min_mv = 3000.0_f32;
     let max_mv = 4500.0_f32;
-    ((battery_mv - min_mv) / (max_mv - min_mv) * 100.0)
-        .clamp(0.0, 100.0) as u8
+    ((battery_mv - min_mv) / (max_mv - min_mv) * 100.0).clamp(0.0, 100.0) as u8
 }
