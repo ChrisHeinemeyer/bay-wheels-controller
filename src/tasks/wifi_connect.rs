@@ -6,7 +6,7 @@ use esp_wifi_sys::include::esp_wifi_set_max_tx_power;
 use crate::tasks::signals::STATUS;
 
 /// Max TX power: 84 = 21 dBm (0.25 dBm units). Helps boards with weak uplink.
-const WIFI_MAX_TX_POWER: i8 = 84;
+const WIFI_TX_POWER: i8 = 78;
 
 #[embassy_executor::task]
 pub async fn wifi_connect_task(
@@ -20,11 +20,11 @@ pub async fn wifi_connect_task(
 
     // Increase TX power to help boards with weak uplink (good RSSI but disconnects)
     unsafe {
-        let ret = esp_wifi_set_max_tx_power(WIFI_MAX_TX_POWER);
+        let ret = esp_wifi_set_max_tx_power(WIFI_TX_POWER);
         if ret == 0 {
             crate::dprintln!(
-                "  TX power set to max ({} dBm)",
-                WIFI_MAX_TX_POWER as i32 / 4
+                "  TX power set to ({} dBm). Max is 21 dBm.",
+                WIFI_TX_POWER as i32 / 4
             );
         } else {
             crate::dprintln!("  TX power set failed: {}", ret);

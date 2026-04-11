@@ -14,7 +14,7 @@ use static_cell::StaticCell;
 use crate::{
     stations::{STATION_DATA_LEN, TARGET_STATIONS},
     tasks::{
-        signals::{STATION_DATA_SIGNAL, STATUS},
+        signals::{FETCH_SIGNAL, STATION_DATA_SIGNAL, STATUS},
         station_parser::StationData,
     },
 };
@@ -112,6 +112,7 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
                                     parser.finish();
                                     STATION_DATA_SIGNAL.signal(station_data);
                                     STATUS.lock().await.last_fetch_at = Some(Instant::now());
+                                    FETCH_SIGNAL.signal(Instant::now());
                                     break;
                                 }
                                 Ok(n) => {

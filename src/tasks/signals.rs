@@ -33,6 +33,7 @@ impl BoardId {
 pub static STATION_SIGNAL: Signal<CriticalSectionRawMutex, StationIdx> = Signal::new();
 pub static STATION_DATA_SIGNAL: Signal<CriticalSectionRawMutex, [StationData; STATION_DATA_LEN]> =
     Signal::new();
+pub static FETCH_SIGNAL: Signal<CriticalSectionRawMutex, Instant> = Signal::new();
 
 /// Shared system status written by individual tasks and read by the serial status reporter.
 #[derive(Copy, Clone)]

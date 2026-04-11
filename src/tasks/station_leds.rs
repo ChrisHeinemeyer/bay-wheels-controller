@@ -4,10 +4,12 @@ use crate::spi_devices::al5887::al5887::Al5887;
 use crate::spi_devices::al5887::enums::Color;
 use crate::spi_devices::al5887::enums::Led;
 use crate::stations::{STATION_DATA_LEN, StationIdx};
+use crate::tasks::signals::FETCH_SIGNAL;
 use crate::tasks::signals::STATION_DATA_SIGNAL;
 use crate::tasks::signals::STATION_SIGNAL;
 use crate::tasks::signals::STATUS;
 use crate::tasks::station_parser::StationData;
+use embassy_time::Instant;
 use embassy_time::{Duration, Timer};
 use heapless::Vec;
 
@@ -17,9 +19,14 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
     al5887.init_driver().await.unwrap();
     let mut last_station = StationIdx::None;
     let mut station_data = STATION_DATA_SIGNAL.wait().await;
+    let mut fetch_time = FETCH_SIGNAL.wait().await;
     crate::dprintln!("Ready to go!");
     loop {
         let station = STATION_SIGNAL.wait().await;
+        if let Some(t) = FETCH_SIGNAL.try_take() {
+            fetch_time = t;
+        }
+        let fetch_age = Instant::now().duration_since(fetch_time).as_secs();
         if station != last_station {
             crate::dprintln!("Station: {:?}", station);
             let updated_station_data = STATION_DATA_SIGNAL.try_take();
@@ -35,10 +42,14 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
                     .await
                     .unwrap();
             } else {
-                let leds = get_leds(station, &station_data);
+                let mut leds = get_leds(station, &station_data);
                 {
                     let mut guard = STATUS.lock().await;
                     guard.led_states = [(0, 0, 0); 12];
+                    let fetch_age_leds = get_fetch_age_leds(fetch_age);
+                    for (led, color) in fetch_age_leds.iter() {
+                        leds.push((*led, *color)).ok();
+                    }
                     for (led, color) in leds.iter() {
                         guard.led_states[*led as usize] = (color.r, color.g, color.b);
                     }
@@ -51,6 +62,7 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
 }
 
 const EBIKE_LEDS: [Led; 5] = [Led::Led1, Led::Led2, Led::Led3, Led::Led4, Led::Led5];
+const FETCH_AGE_LEDS: [Led; 1] = [Led::Led11];
 
 const EBIKE_COLOR: Color = Color { r: 0, g: 255, b: 0 }; // Green
 const MECHANICAL_BIKE_COLOR: Color = Color { r: 0, g: 0, b: 255 }; // Blue
@@ -93,5 +105,28 @@ fn get_leds(
             }
         }
     }
+    leds
+}
+
+fn get_fetch_age_leds(fetch_age: u64) -> Vec<(Led, Color), 1> {
+    let mut leds = Vec::new();
+    if fetch_age < 60 {
+        leds.push((FETCH_AGE_LEDS[0], Color { r: 0, g: 255, b: 0 }))
+            .ok();
+    } else if fetch_age < 120 {
+        leds.push((
+            FETCH_AGE_LEDS[0],
+            Color {
+                r: 255,
+                g: 255,
+                b: 0,
+            },
+        ))
+        .ok();
+    } else {
+        leds.push((FETCH_AGE_LEDS[0], Color { r: 255, g: 0, b: 0 }))
+            .ok();
+    }
+    crate::dprintln!("Fetch age leds: {:?}", leds);
     leds
 }
