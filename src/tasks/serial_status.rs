@@ -41,7 +41,7 @@ pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Asyn
     let mut frame_count: u32 = 0;
 
     loop {
-        Timer::after(Duration::from_millis(200)).await;
+        Timer::after(Duration::from_millis(300)).await;
 
         // Advertise version at startup and periodically for late-connecting clients.
         if frame_count % VERSION_INTERVAL == 0 {

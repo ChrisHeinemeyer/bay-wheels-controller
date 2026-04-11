@@ -113,7 +113,7 @@ fn get_fetch_age_leds(fetch_age: u64) -> Vec<(Led, Color), 1> {
     if fetch_age < 60 {
         leds.push((FETCH_AGE_LEDS[0], Color { r: 0, g: 255, b: 0 }))
             .ok();
-    } else if fetch_age < 120 {
+    } else if fetch_age < 180 {
         leds.push((
             FETCH_AGE_LEDS[0],
             Color {

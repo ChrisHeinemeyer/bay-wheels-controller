@@ -152,8 +152,8 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
             }
         }
 
-        crate::dprintln!("=== Request complete, waiting 30 seconds ===");
+        crate::dprintln!("=== Request complete, waiting 60 seconds ===");
         crate::dprintln!("");
-        Timer::after(Duration::from_secs(30)).await;
+        Timer::after(Duration::from_secs(60)).await;
     }
 }
