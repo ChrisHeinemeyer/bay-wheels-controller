@@ -254,7 +254,7 @@ export function initStatusTab(): void {
     batteryVal.textContent = `${pct}%`;
     batteryBar.style.width = `${pct}%`;
     batteryBar.style.background =
-      pct > 50 ? "var(--success)" : pct > 20 ? "#e3b341" : "var(--error)";
+      pct > 70 ? "var(--success)" : pct > 30 ? "#e3b341" : "var(--error)";
 
     // WiFi
     wifiDot.className =
