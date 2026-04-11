@@ -1,3 +1,4 @@
+pub mod battery;
 pub mod blink;
 pub mod fetch;
 pub mod input_read;

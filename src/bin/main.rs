@@ -14,11 +14,12 @@ use alloc::string::String;
 #[cfg(not(feature = "debug-serial"))]
 use bay_wheels_controller::tasks::serial_status;
 use bay_wheels_controller::tasks::signals::{BoardId, STATUS};
-use bay_wheels_controller::tasks::{blink, fetch, input_read, station_leds, wifi_connect};
+use bay_wheels_controller::tasks::{battery, blink, fetch, input_read, station_leds, wifi_connect};
 use bay_wheels_controller::{GIT_VERSION, dprintln};
 use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
+use esp_hal::analog::adc::{Adc, AdcCalLine, AdcConfig, Attenuation};
 use esp_hal::{clock::CpuClock, gpio, timer::timg::TimerGroup, usb_serial_jtag::UsbSerialJtag};
 use esp_storage::FlashStorage;
 
@@ -203,6 +204,14 @@ async fn main(spawner: Spawner) -> ! {
 
     STATUS.lock().await.board_id = board_id;
 
+    let analog_pin = peripherals.GPIO5;
+    let mut adc1_config = AdcConfig::new();
+    let pin = adc1_config.enable_pin_with_cal::<_, AdcCalLine<esp_hal::peripherals::ADC1<'static>>>(
+        analog_pin,
+        Attenuation::_2p5dB,
+    );
+    let adc1 = Adc::new(peripherals.ADC1, adc1_config);
+
     let shift_register = spi_devices::shift_register::ShiftRegister::new(
         peripherals.SPI2,
         gpio::Output::new(
@@ -259,6 +268,9 @@ async fn main(spawner: Spawner) -> ! {
     spawner
         .spawn(blink::blink_task(pwm_pin))
         .expect("Failed to spawn blink_task");
+    spawner
+        .spawn(battery::battery_task(adc1, pin))
+        .expect("Failed to spawn battery_task");
     spawner
         .spawn(station_leds::station_leds_task(al5887))
         .expect("Failed to spawn station_leds_task");
