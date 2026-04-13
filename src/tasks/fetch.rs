@@ -11,6 +11,10 @@ use reqwless::{
 };
 use static_cell::StaticCell;
 
+use esp_wifi_sys::include::{
+    esp_wifi_set_ps, wifi_ps_type_t_WIFI_PS_MAX_MODEM, wifi_ps_type_t_WIFI_PS_NONE,
+};
+
 use crate::{
     stations::{STATION_DATA_LEN, TARGET_STATIONS},
     tasks::{
@@ -57,6 +61,10 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
     crate::dprintln!("DEBUG: Entering main loop...");
 
     loop {
+        // Disable modem power save for the duration of this fetch.  Maximum power save
+        // (listen_interval=10, ~1 s sleep) causes DNS UDP replies and TLS handshake
+        // packets to be dropped while the modem is sleeping.
+        unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_NONE) };
         crate::dprintln!("");
         crate::dprintln!("=== Fetching from {} ===", URL);
 
@@ -154,6 +162,8 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
 
         crate::dprintln!("=== Request complete, waiting 60 seconds ===");
         crate::dprintln!("");
+        // Re-enable Maximum power save during the idle gap so the modem can sleep.
+        unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) };
         Timer::after(Duration::from_secs(60)).await;
     }
 }

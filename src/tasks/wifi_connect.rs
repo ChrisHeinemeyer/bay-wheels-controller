@@ -1,6 +1,6 @@
 use alloc::string::String;
 use embassy_time::{Duration, Timer};
-use esp_radio::wifi::{AuthMethod, PowerSaveMode, WifiController};
+use esp_radio::wifi::{AuthMethod, WifiController};
 use esp_wifi_sys::include::esp_wifi_set_max_tx_power;
 
 use crate::tasks::signals::STATUS;
@@ -150,13 +150,9 @@ pub async fn wifi_connect_task(
         Timer::after(Duration::from_millis(100)).await;
     }
 
-    // Enable maximum modem power save — radio sleeps for listen_interval beacons (~1 s)
-    // between AP check-ins. Safe because this device only makes outbound HTTPS fetches.
-    if let Err(e) = controller.set_power_saving(PowerSaveMode::Maximum) {
-        crate::dprintln!("Warning: failed to set modem power save: {:?}", e);
-    } else {
-        crate::dprintln!("Modem power save: Maximum (listen_interval=10, ~1 s sleep)");
-    }
+    // Power save is owned by fetch_task: WIFI_PS_NONE during the active HTTP fetch,
+    // WIFI_PS_MAX_MODEM during the 60-second idle gap between fetches.
+    // Do not enable it here — doing so races with DHCP and the first DNS lookup.
 
     // Adaptive TX power state.
     // Start at TX_POWER_MAX for safety, then probe downward in steps.
