@@ -136,6 +136,7 @@ export function initStatusTab(): void {
   const wifiDot = document.getElementById("statusWifiDot")!;
   const wifiText = document.getElementById("statusWifiText")!;
   const rssiEl = document.getElementById("statusRssi")!;
+  const txPowerEl = document.getElementById("statusTxPower")!;
   const fetchAgeEl = document.getElementById("statusFetchAge")!;
   const inputOverlay = document.getElementById("statusInputOverlay")!;
   const ledsEl = document.getElementById("statusLeds")!;
@@ -261,6 +262,9 @@ export function initStatusTab(): void {
       "dot " + (frame.wifiConnected ? "connected" : "disconnected");
     wifiText.textContent = frame.wifiConnected ? "Connected" : "Disconnected";
     rssiEl.textContent = frame.wifiConnected ? `${frame.rssi} dBm` : "--";
+    txPowerEl.textContent = frame.wifiConnected
+      ? `${frame.txPowerDbm.toFixed(1)} dBm`
+      : "--";
 
     // GBFS fetch age
     if (frame.fetchAgeSecs === 0xffffffff) {
@@ -388,6 +392,8 @@ export function initStatusTab(): void {
     setMapHighlight(null);
     versionEl.textContent = "--";
     boardIdEl.textContent = "--";
+    rssiEl.textContent = "--";
+    txPowerEl.textContent = "--";
   };
 
   (

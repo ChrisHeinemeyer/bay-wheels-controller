@@ -5,7 +5,7 @@ use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use crate::GIT_VERSION;
 use crate::tasks::signals::{STATUS, SystemStatus};
 
-/// Binary frame layout (50 bytes):
+/// Binary frame layout (51 bytes):
 ///
 /// | Offset | Size | Field                                         |
 /// |--------|------|-----------------------------------------------|
@@ -18,13 +18,14 @@ use crate::tasks::signals::{STATUS, SystemStatus};
 /// | 10     |  1   | station_input_row (0xFF = idle)               |
 /// | 11     |  1   | station_input_col (0xFF = idle)               |
 /// | 12     |  1   | board_id (0=Board0, 1=Board1, 2=Board2, 3=Board3) |
-/// | 13     | 36   | led_rgb (12 × r,g,b)                          |
-/// | 49     |  1   | XOR checksum of bytes 0–48                    |
+/// | 13     |  1   | tx_power (i8, quarter-dBm; divide by 4 for dBm)  |
+/// | 14     | 36   | led_rgb (12 × r,g,b)                          |
+/// | 50     |  1   | XOR checksum of bytes 0–49                    |
 ///
 /// The checksum allows the receiver to detect a false magic byte (e.g. rssi == -85 == 0xAB)
 /// and re-scan for the real frame boundary.
 const MAGIC: u8 = 0xAB;
-const FRAME_SIZE: usize = 50;
+const FRAME_SIZE: usize = 51;
 
 /// Magic byte for version info frame (sent once at startup).
 const VERSION_MAGIC: u8 = 0xAC;
@@ -34,14 +35,25 @@ const VERSION_FRAME_SIZE: usize = 1 + VERSION_STR_LEN + 1; // magic + version + 
 /// Send version frame every N status frames (~10 s) so late-connecting clients can see it.
 const VERSION_INTERVAL: u32 = 50;
 
+/// If a write times out the host likely isn't connected. Sleep this long before retrying
+/// instead of hammering the FIFO every 300 ms.
+const DISCONNECTED_SLEEP_MS: u64 = 2_000;
+const CONNECTED_SLEEP_MS: u64 = 300;
+
 #[embassy_executor::task]
 pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Async>) {
     crate::dprintln!("Serial status task started!");
     let version_frame = build_version_frame();
     let mut frame_count: u32 = 0;
+    let mut host_connected = true;
 
     loop {
-        Timer::after(Duration::from_millis(300)).await;
+        let sleep_ms = if host_connected {
+            CONNECTED_SLEEP_MS
+        } else {
+            DISCONNECTED_SLEEP_MS
+        };
+        Timer::after(Duration::from_millis(sleep_ms)).await;
 
         // Advertise version at startup and periodically for late-connecting clients.
         if frame_count % VERSION_INTERVAL == 0 {
@@ -55,10 +67,17 @@ pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Asyn
             build_frame(&guard)
         };
 
-        // Non-blocking: drop the frame if the USB FIFO doesn't drain within 10 ms,
-        // which means no host is reading (e.g. the browser tab is closed).
-        let _ = with_timeout(Duration::from_millis(10), serial.write_all(&frame)).await;
-        let _ = with_timeout(Duration::from_millis(10), serial.flush()).await;
+        // Non-blocking: if the USB FIFO doesn't drain within 10 ms no host is reading.
+        // Track the outcome to adjust the sleep interval — avoid waking every 300 ms
+        // when the browser tab is closed.
+        let write_ok = with_timeout(Duration::from_millis(10), serial.write_all(&frame))
+            .await
+            .is_ok();
+        let flush_ok = write_ok
+            && with_timeout(Duration::from_millis(10), serial.flush())
+                .await
+                .is_ok();
+        host_connected = flush_ok;
     }
 }
 
@@ -87,17 +106,18 @@ fn build_frame(s: &SystemStatus) -> [u8; FRAME_SIZE] {
     buf[10] = s.station_input_row.0;
     buf[11] = s.station_input_col.0;
     buf[12] = s.board_id as u8;
+    buf[13] = s.tx_power as u8;
 
     for i in 0..12 {
         let (r, g, b) = s.led_states[i];
-        buf[13 + i * 3] = r;
-        buf[13 + i * 3 + 1] = g;
-        buf[13 + i * 3 + 2] = b;
+        buf[14 + i * 3] = r;
+        buf[14 + i * 3 + 1] = g;
+        buf[14 + i * 3 + 2] = b;
     }
 
     // XOR checksum of all data bytes — lets the receiver detect a false magic byte
     // (e.g. rssi == -85 dBm == 0xAB) and re-scan for the real frame boundary.
-    buf[49] = buf[..49].iter().fold(0u8, |acc, b| acc ^ b);
+    buf[50] = buf[..50].iter().fold(0u8, |acc, b| acc ^ b);
 
     buf
 }
