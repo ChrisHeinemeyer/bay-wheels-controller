@@ -5,8 +5,14 @@ use esp_wifi_sys::include::esp_wifi_set_max_tx_power;
 
 use crate::tasks::signals::STATUS;
 
-/// Max TX power: 84 = 21 dBm (0.25 dBm units). Helps boards with weak uplink.
-const WIFI_TX_POWER: i8 = 84;
+/// Starting TX power (quarter-dBm). Used for initial connect and reconnects.
+const TX_POWER_MAX: i8 = 84; // 21 dBm
+/// Minimum TX power the adaptive logic will probe down to (user-tested safe floor).
+const TX_POWER_MIN: i8 = 60; // 15.0 dBm
+/// Step size for each downward probe (quarter-dBm = 0.5 dBm per step).
+const TX_POWER_STEP: i8 = 2;
+/// Number of 5-second maintenance ticks to stay stable before stepping down.
+const STABLE_TICKS_PER_STEP: u32 = 36; // 36 × 5 s = 3 min per step
 
 #[embassy_executor::task]
 pub async fn wifi_connect_task(
@@ -18,18 +24,7 @@ pub async fn wifi_connect_task(
     controller.start().unwrap();
     crate::dprintln!("WiFi controller started!");
 
-    // Increase TX power to help boards with weak uplink (good RSSI but disconnects)
-    unsafe {
-        let ret = esp_wifi_set_max_tx_power(WIFI_TX_POWER);
-        if ret == 0 {
-            crate::dprintln!(
-                "  TX power set to ({} dBm). Max is 21 dBm.",
-                WIFI_TX_POWER as i32 / 4
-            );
-        } else {
-            crate::dprintln!("  TX power set failed: {}", ret);
-        }
-    }
+    apply_tx_power(TX_POWER_MAX);
 
     // Scan for networks
     crate::dprintln!("Scanning for networks...");
@@ -148,25 +143,78 @@ pub async fn wifi_connect_task(
             if controller.connect().is_ok() {
                 crate::dprintln!("Connect command re-sent");
             }
-        } else if attempts % 10 == 0 {
-            // crate::dprintln!(
-            //     "Waiting for connection... ({}s) [RSSI: {}]",
-            //     attempts / 10,
-            //     target_ap.signal_strength
-            // );
         }
 
         Timer::after(Duration::from_millis(100)).await;
     }
 
-    // Keep WiFi connection alive
+    // Adaptive TX power state.
+    // Start at TX_POWER_MAX for safety, then probe downward in steps.
+    // On disconnect while stepping, lock at TX_POWER_MAX for the rest of the session
+    // (TX circuitry on some boards can't sustain lower power).
+    let mut tx_power: i8 = TX_POWER_MAX;
+    let mut tx_locked = false;
+    let mut stable_ticks: u32 = 0;
+
+    // Keep WiFi connection alive and manage adaptive TX power + live RSSI.
     loop {
+        Timer::after(Duration::from_secs(5)).await;
+
         let connected = controller.is_connected().unwrap_or(false);
-        STATUS.lock().await.wifi_connected = connected;
+
         if !connected {
             crate::dprintln!("⚠ WiFi disconnected! Attempting reconnect...");
+
+            // If we were stepping down, lock TX at max — this board needs the headroom.
+            if tx_power < TX_POWER_MAX {
+                crate::dprintln!(
+                    "  TX power was {} ({:.1} dBm) at disconnect — locking at max",
+                    tx_power,
+                    tx_power as f32 / 4.0
+                );
+                tx_locked = true;
+            }
+            tx_power = TX_POWER_MAX;
+            stable_ticks = 0;
+            apply_tx_power(tx_power);
+            STATUS.lock().await.tx_power = tx_power;
+
             let _ = controller.connect();
+            STATUS.lock().await.wifi_connected = false;
+            continue;
         }
-        Timer::after(Duration::from_secs(5)).await;
+
+        // Connected — update live RSSI.
+        let rssi = controller.rssi().unwrap_or(0) as i8;
+        {
+            let mut guard = STATUS.lock().await;
+            guard.wifi_connected = true;
+            guard.rssi = rssi;
+        }
+
+        // Step TX power down if not locked and not yet at floor.
+        if !tx_locked && tx_power > TX_POWER_MIN {
+            stable_ticks = stable_ticks.saturating_add(1);
+            if stable_ticks >= STABLE_TICKS_PER_STEP {
+                tx_power -= TX_POWER_STEP;
+                stable_ticks = 0;
+                apply_tx_power(tx_power);
+                STATUS.lock().await.tx_power = tx_power;
+                crate::dprintln!(
+                    "TX power stepped down to {} ({:.1} dBm)",
+                    tx_power,
+                    tx_power as f32 / 4.0
+                );
+            }
+        }
+    }
+}
+
+fn apply_tx_power(power: i8) {
+    unsafe {
+        let ret = esp_wifi_set_max_tx_power(power);
+        if ret != 0 {
+            crate::dprintln!("Warning: esp_wifi_set_max_tx_power({}) failed: {}", power, ret);
+        }
     }
 }

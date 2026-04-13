@@ -42,6 +42,9 @@ pub struct SystemStatus {
     pub battery_pct: u8,
     pub wifi_connected: bool,
     pub rssi: i8,
+    /// Current WiFi TX power in quarter-dBm units (same scale as esp_wifi_set_max_tx_power).
+    /// e.g. 78 = 19.5 dBm, 72 = 18.0 dBm.
+    pub tx_power: i8,
     /// `None` until the first successful GBFS fetch completes.
     pub last_fetch_at: Option<Instant>,
     pub station_input: StationIdx,
@@ -58,6 +61,7 @@ pub static STATUS: Mutex<CriticalSectionRawMutex, SystemStatus> = Mutex::new(Sys
     battery_pct: 100,
     wifi_connected: false,
     rssi: 0,
+    tx_power: 78,
     last_fetch_at: None,
     station_input: StationIdx::None,
     station_input_row: Row::IDLE,
