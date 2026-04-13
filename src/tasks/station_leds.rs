@@ -127,6 +127,5 @@ fn get_fetch_age_leds(fetch_age: u64) -> Vec<(Led, Color), 1> {
         leds.push((FETCH_AGE_LEDS[0], Color { r: 255, g: 0, b: 0 }))
             .ok();
     }
-    crate::dprintln!("Fetch age leds: {:?}", leds);
     leds
 }

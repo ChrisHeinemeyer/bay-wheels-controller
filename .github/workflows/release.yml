@@ -23,8 +23,15 @@ jobs:
           version: "1.88.0.0"
           buildtargets: esp32s3
 
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Install cargo-espflash
-        run: cargo install cargo-espflash --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-espflash
 
       - name: Build and create firmware image
         run: |
