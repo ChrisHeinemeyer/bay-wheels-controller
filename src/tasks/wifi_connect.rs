@@ -1,6 +1,6 @@
 use alloc::string::String;
 use embassy_time::{Duration, Timer};
-use esp_radio::wifi::{AuthMethod, WifiController};
+use esp_radio::wifi::{AuthMethod, PowerSaveMode, WifiController};
 use esp_wifi_sys::include::esp_wifi_set_max_tx_power;
 
 use crate::tasks::signals::STATUS;
@@ -64,12 +64,14 @@ pub async fn wifi_connect_task(
     crate::dprintln!("  Auth Method: {:?}", target_ap.auth_method);
     crate::dprintln!("");
 
-    // Configure with scanned AP settings
+    // Configure with scanned AP settings.
+    // listen_interval=10: radio sleeps for 10 beacon intervals (~1 s) in MAX_MODEM power save.
     let client_config = esp_radio::wifi::ClientConfig::default()
         .with_ssid(String::from(ssid))
         .with_password(String::from(password))
         .with_auth_method(target_ap.auth_method.unwrap_or(AuthMethod::Wpa2Personal))
-        .with_channel(target_ap.channel);
+        .with_channel(target_ap.channel)
+        .with_listen_interval(10);
 
     crate::dprintln!("Setting WiFi config for SSID: '{}'", ssid);
     crate::dprintln!("  Auth method: {:?}", target_ap.auth_method);
@@ -148,6 +150,14 @@ pub async fn wifi_connect_task(
         Timer::after(Duration::from_millis(100)).await;
     }
 
+    // Enable maximum modem power save — radio sleeps for listen_interval beacons (~1 s)
+    // between AP check-ins. Safe because this device only makes outbound HTTPS fetches.
+    if let Err(e) = controller.set_power_saving(PowerSaveMode::Maximum) {
+        crate::dprintln!("Warning: failed to set modem power save: {:?}", e);
+    } else {
+        crate::dprintln!("Modem power save: Maximum (listen_interval=10, ~1 s sleep)");
+    }
+
     // Adaptive TX power state.
     // Start at TX_POWER_MAX for safety, then probe downward in steps.
     // On disconnect while stepping, lock at TX_POWER_MAX for the rest of the session
@@ -214,7 +224,11 @@ fn apply_tx_power(power: i8) {
     unsafe {
         let ret = esp_wifi_set_max_tx_power(power);
         if ret != 0 {
-            crate::dprintln!("Warning: esp_wifi_set_max_tx_power({}) failed: {}", power, ret);
+            crate::dprintln!(
+                "Warning: esp_wifi_set_max_tx_power({}) failed: {}",
+                power,
+                ret
+            );
         }
     }
 }
