@@ -16,7 +16,7 @@ use bay_wheels_controller::tasks::serial_status;
 use bay_wheels_controller::tasks::signals::{BoardId, STATUS};
 use bay_wheels_controller::tasks::{battery, fetch, input_read, station_leds, wifi_connect};
 use bay_wheels_controller::{GIT_VERSION, dprintln};
-use bay_wheels_controller::{network, provisioning, spi_devices, wifi, wifi_config};
+use bay_wheels_controller::{network, provisioning, spi_devices, wifi_config};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::analog::adc::{Adc, AdcCalLine, AdcConfig, Attenuation};
@@ -69,8 +69,7 @@ async fn main(spawner: Spawner) -> ! {
     rtt_target::rtt_init_print!();
     dprintln!("Starting ESP32-S3... FW {}", GIT_VERSION);
 
-    // Initialize ESP-HAL with max CPU clock
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let peripherals = esp_hal::init(config);
 
     // Setup heap allocator
@@ -154,9 +153,6 @@ async fn main(spawner: Spawner) -> ! {
     spawner
         .spawn(net_task(runner))
         .expect("Failed to spawn net_task");
-
-    // Setup WiFi sniffer
-    wifi::setup_sniffer(interfaces.sniffer);
 
     // Read the two-bit board ID from GPIO37 (bit 0) and GPIO38 (bit 1).
     // Both pins are pulled up internally; a resistor to GND grounds a bit.
