@@ -95,7 +95,11 @@ async fn wait_with_breathing<T>(
             Either::Second(_) => {
                 let brightness = if phase < 128 { phase } else { 255 - phase };
                 let _ = al5887
-                    .set_led_brightness_color(WIFI_STATUS_LED, brightness, WIFI_STATUS_BREATHE_COLOR)
+                    .set_led_brightness_color(
+                        WIFI_STATUS_LED,
+                        brightness,
+                        WIFI_STATUS_BREATHE_COLOR,
+                    )
                     .await;
                 phase = phase.wrapping_add(BREATH_STEP);
             }
