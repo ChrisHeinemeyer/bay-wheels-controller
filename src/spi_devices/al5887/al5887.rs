@@ -115,12 +115,6 @@ impl<'d> Al5887<'d> {
         Timer::after(Duration::from_millis(1)).await;
         self.led_rst_n.set_high();
         self.set_chip_enable(true).await?;
-        let led_0_brightness_color =
-            SpiFrame::set_led_brightness_color(Led::Led0, 127, Color::new(255, 255, 255));
-        self.write_register(led_0_brightness_color[0]).await?;
-        self.write_register(led_0_brightness_color[1]).await?;
-        self.write_register(led_0_brightness_color[2]).await?;
-        self.write_register(led_0_brightness_color[3]).await?;
         Ok(())
     }
 

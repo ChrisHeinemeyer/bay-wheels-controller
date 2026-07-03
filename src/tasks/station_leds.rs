@@ -9,6 +9,9 @@ use crate::tasks::signals::STATION_DATA_SIGNAL;
 use crate::tasks::signals::STATION_SIGNAL;
 use crate::tasks::signals::STATUS;
 use crate::tasks::station_parser::StationData;
+use embassy_futures::select::{Either, select};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 use embassy_time::{Duration, Timer};
 use heapless::Vec;
@@ -18,8 +21,14 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
     crate::dprintln!("Station LEDs task started!");
     al5887.init_driver().await.unwrap();
     let mut last_station = StationIdx::None;
-    let mut station_data = STATION_DATA_SIGNAL.wait().await;
-    let mut fetch_time = FETCH_SIGNAL.wait().await;
+    // Breathe the wifi-status LED (normally green/red for fetch freshness, see
+    // get_fetch_age_leds) while waiting for the first WiFi connect + GBFS fetch.
+    let mut station_data = wait_with_breathing(&STATION_DATA_SIGNAL, &mut al5887).await;
+    let mut fetch_time = wait_with_breathing(&FETCH_SIGNAL, &mut al5887).await;
+    al5887
+        .set_led_brightness_color(WIFI_STATUS_LED, 0, WIFI_STATUS_BREATHE_COLOR)
+        .await
+        .unwrap();
     crate::dprintln!("Ready to go!");
     loop {
         let station = STATION_SIGNAL.wait().await;
@@ -63,6 +72,36 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
 
 const EBIKE_LEDS: [Led; 5] = [Led::Led1, Led::Led2, Led::Led3, Led::Led4, Led::Led5];
 const FETCH_AGE_LEDS: [Led; 1] = [Led::Led11];
+
+const WIFI_STATUS_LED: Led = Led::Led11;
+const WIFI_STATUS_BREATHE_COLOR: Color = Color {
+    r: 0,
+    g: 120,
+    b: 255,
+};
+const BREATH_TICK: Duration = Duration::from_millis(30);
+/// Phase step per tick — one full breathe cycle takes 256 / BREATH_STEP ticks.
+const BREATH_STEP: u8 = 4;
+
+/// Waits for `signal`, breathing `WIFI_STATUS_LED` in the meantime.
+async fn wait_with_breathing<T>(
+    signal: &'static Signal<CriticalSectionRawMutex, T>,
+    al5887: &mut Al5887<'static>,
+) -> T {
+    let mut phase: u8 = 0;
+    loop {
+        match select(signal.wait(), Timer::after(BREATH_TICK)).await {
+            Either::First(value) => return value,
+            Either::Second(_) => {
+                let brightness = if phase < 128 { phase } else { 255 - phase };
+                let _ = al5887
+                    .set_led_brightness_color(WIFI_STATUS_LED, brightness, WIFI_STATUS_BREATHE_COLOR)
+                    .await;
+                phase = phase.wrapping_add(BREATH_STEP);
+            }
+        }
+    }
+}
 
 const EBIKE_COLOR: Color = Color { r: 0, g: 255, b: 0 }; // Green
 const MECHANICAL_BIKE_COLOR: Color = Color { r: 0, g: 0, b: 255 }; // Blue
