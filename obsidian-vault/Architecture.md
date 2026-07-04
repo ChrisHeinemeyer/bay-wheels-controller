@@ -47,7 +47,7 @@ None of these tasks call each other or hold a reference to another task's periph
 ```
 GBFS HTTPS feed (~600 stations, all of Bay Wheels)
   → fetch_task (fetch.rs) — 60s poll, streams response
-    → StreamingStationParser (station_parser.rs) — filters down to TARGET_STATIONS (~120)
+    → StreamingStationParser (station_parser.rs) — filters down to TARGET_STATIONS (611, ~all of them)
       → STATION_DATA_SIGNAL  +  FETCH_SIGNAL (timestamp)
         → station_leds_task caches the [StationData; 610] array
 

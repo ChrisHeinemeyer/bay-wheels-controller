@@ -85,16 +85,18 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
         };
         crate::dprintln!("✓ Connected — reusing this connection until it drops");
 
+        // The handshake needed the modem fully awake; a plain GET on this already-open
+        // connection involves no new DNS or handshake packets, so let the modem sleep
+        // for the rest of this connection's life (see Power-Management#Not yet done item 2).
+        unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) };
+
         // Reuse this one connection for repeated fetches until something goes wrong (the
         // GBFS server is under no obligation to keep an idle connection open for 60s), at
         // which point we fall out to the outer loop and reconnect from scratch.
         loop {
-            unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_NONE) };
             crate::dprintln!("=== Fetching {} ===", PATH);
 
             let outcome = fetch_once(&mut resource).await;
-
-            unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) };
 
             if let FetchOutcome::ConnectionLost = outcome {
                 crate::dprintln!("Reconnecting in 60 seconds...");

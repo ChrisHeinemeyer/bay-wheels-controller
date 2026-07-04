@@ -11,7 +11,7 @@ A large generated-looking enum (`src/stations.rs`), one variant per Bay Wheels s
 - `Unknown = 65534` — input was active but doesn't map to any entry in `BOARD_STATION_MAP` for the current board.
 - `None = 65535` — no input active (idle grid).
 
-`STATION_DATA_LEN = 610` sizes the `[StationData; STATION_DATA_LEN]` array that [[Task-Fetch]] populates and [[Task-Station-LEDs]] indexes directly by `station_idx as usize` — an O(1) lookup traded for a fairly large static array (610 × `size_of::<StationData>()`, each `StationData` being a `StationIdx` (2 bytes) + 2×`u8`, so ~4-8 bytes with padding — a few KB total, not huge, but notably it's sized to the *entire network*, not just the ~120 stations this device cares about, because ordinals need to be stable/unique across the whole enum).
+`STATION_DATA_LEN = 610` sizes the `[StationData; STATION_DATA_LEN]` array that [[Task-Fetch]] populates and [[Task-Station-LEDs]] indexes directly by `station_idx as usize` — an O(1) lookup traded for a fairly large static array (610 × `size_of::<StationData>()`, each `StationData` being a `StationIdx` (2 bytes) + 2×`u8`, so ~4-8 bytes with padding — a few KB total, not huge, but notably it's sized to the *entire network*, and it turns out this device cares about nearly all of them anyway (see [[Data-Model#TARGET_STATIONS]]) — the array is sized this way primarily because ordinals need to be stable/unique across the whole enum, not because of the target/non-target split.
 
 ## `Row` / `Column` (`grid.rs`)
 
@@ -25,7 +25,7 @@ Thin newtypes (`Row(pub u8)`, `Column(pub u8)`) over the raw shift-register bit 
 
 ## `TARGET_STATIONS`
 
-`&[(&str, StationIdx)]`, ~120 entries, mapping GBFS station UUIDs (the opaque IDs Lyft's API uses, e.g. `"bfb90ed7-6039-4c61-9b13-fb60b1786dde"`) to `StationIdx`. This is the *other* direction from `BOARD_STATION_MAP` — it's what [[Task-Station-Parser]] uses to decide which stations in the GBFS feed are worth keeping. Two ID formats appear in the data: UUID-style (`"bfb90ed7-..."`) and long numeric strings (`"1838251762103669212"`) — Lyft's GBFS feed apparently mixes both ID schemes across its station list, so the matching code just does a plain string comparison rather than assuming one format.
+`&[(&str, StationIdx)]`, **611 entries — essentially the entire network** (confirmed by direct count: `sed -n '704,2789p' src/stations.rs | grep -c 'StationIdx::'` → 611, against `STATION_DATA_LEN = 610`), mapping GBFS station UUIDs (the opaque IDs Lyft's API uses, e.g. `"bfb90ed7-6039-4c61-9b13-fb60b1786dde"`) to `StationIdx`. **Correction (2026-07-04): an earlier version of this vault said "~120 entries" — that was wrong, from a grep pattern that only matched entries formatted on a single line and silently missed the rest.** This is the *other* direction from `BOARD_STATION_MAP` — it's what [[Task-Station-Parser]] uses to decide which stations in the GBFS feed are worth keeping. Since it's nearly every station in the network, that filtering step barely filters anything — see [[Power-Management#Not yet done]] for what this means for the "download the whole feed just to use a fraction of it" framing. Two ID formats appear in the data: UUID-style (`"bfb90ed7-..."`) and long numeric strings (`"1838251762103669212"`) — Lyft's GBFS feed apparently mixes both ID schemes across its station list, so the matching code just does a plain string comparison rather than assuming one format.
 
 ## How the two maps relate
 

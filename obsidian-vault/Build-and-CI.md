@@ -61,6 +61,21 @@ Plus `linker_be_nice()` — intercepts linker errors for common esp-hal setup mi
 - **Release** (tag push `v*`): builds firmware for `esp32s3` using the `esp-rs/xtensa-toolchain` action, presumably uploads the `.bin` as a release asset (the workflow continues past what was read here — check the full file for the upload step).
 - **Deploy web setup**: two triggers — (a) direct push to `main` touching `web/**`, deploys immediately; (b) `workflow_run` after Release completes, so a tag push updates both the firmware release *and* the hosted web flasher's bundled firmware binary and GBFS station data in the same logical release. Note it re-fetches `station_information.json` live from Lyft at deploy time (not committed), so the hosted map's station list can silently drift from what `TARGET_STATIONS` in the firmware knows about if Lyft adds/removes/renames stations between deploys.
 
+## Local build + flash to real hardware (probe-rs, via `cargo run`)
+
+This is the fast inner-loop way to get firmware onto a physical board plugged in over USB and watch its live RTT log — distinct from the README's `cargo espflash flash --chip esp32s3 --monitor` (which uses `espflash` instead of `probe-rs`; both work, but this repo's `.cargo/config.toml` wires `cargo run` to the `probe-rs` path by default).
+
+```bash
+. $HOME/export-esp.sh              # sourced, not run — puts the Xtensa esp-rs toolchain on PATH
+cargo run --release --features use-env
+```
+
+- **`. $HOME/export-esp.sh`** — a local (not repo-committed) environment script from the esp-rs toolchain install (see [The Rust on ESP Book](https://docs.esp-rs.org/book/)) that puts the `xtensa-esp32s3-none-elf` Rust toolchain and its LLVM fork on `PATH`. Must be sourced (`.`/`source`), not executed, or the exports won't reach your shell. Needed once per terminal session before any `cargo build`/`run`/`check` against this crate's `xtensa-esp32s3-none-elf` target (see `.cargo/config.toml`).
+- **`--features use-env`** — bypasses the NVS/serial provisioning flow entirely by baking `SSID`/`PASSWORD` from a local `.env` file (copy `.env.dist` → `.env` first) directly into the binary at compile time. Fast for iterating on a known dev network; see [[Provisioning-and-Config#Two credential paths at compile time]] for why this must never be the flashed feature set for a real deployment (the WiFi password ends up in the binary in plaintext).
+- **Why `cargo run` flashes at all**: `.cargo/config.toml` sets `runner = "probe-rs run --chip=esp32s3 --preverify --always-print-stacktrace --no-location --catch-hardfault"` for the `xtensa-esp32s3-none-elf` target, so `cargo run` builds, flashes over the board's built-in USB-Serial-JTAG (no external debug probe needed on the S3), and then attaches and streams the RTT log (`dprintln!` output, since this is a non-`debug-serial` build) live in the terminal until you stop it (`Ctrl+C`, or `pkill -f "probe-rs run"` if it was launched in the background).
+- The board enumerates as a USB-serial device (e.g. `/dev/tty.usbmodemXXX` on macOS) — that's the same USB-Serial-JTAG peripheral [[Task-Serial-Status]]/[[Provisioning-and-Config]] multiplex at runtime, but at the OS/tooling level it's independent of and unrelated to the RTT channel `probe-rs` uses for logs.
+- To exercise the WiFi provisioning wizard instead of `use-env`, flash without that feature (`cargo run --release`) — first boot with no NVS credentials stored drops straight into [[Provisioning-and-Config]]'s serial wizard.
+
 ## Git hooks (`.githooks/`, installed via `./scripts/setup-hooks.sh`)
 
 - **pre-commit**: `cargo fmt` + `npx lint-staged` (presumably Prettier for the TS apps, per the README).

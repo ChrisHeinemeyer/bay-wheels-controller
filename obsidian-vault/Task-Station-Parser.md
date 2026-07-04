@@ -19,7 +19,7 @@ Not an Embassy task itself — a stateful incremental parser instantiated fresh 
 
 ## Filtering
 
-`parse_single_station` only returns `Some(StationData)` if the parsed `station_id` UUID matches an entry in `target_stations: &'static [(&str, StationIdx)]` (i.e. [[Data-Model#TARGET_STATIONS]], ~120 entries out of the full network). Everything else increments `ignored_count` and is dropped — this is where the "only care about ~120 of 600+ stations" filtering actually happens, station-by-station, as the response streams in. It does **not** reduce what's downloaded over the air (see [[Task-Fetch#Cost per cycle]]) — it only avoids buffering/processing the non-target stations' data further.
+`parse_single_station` only returns `Some(StationData)` if the parsed `station_id` UUID matches an entry in `target_stations: &'static [(&str, StationIdx)]` (i.e. [[Data-Model#TARGET_STATIONS]] — **611 entries, essentially the whole network**, not the small subset an earlier version of this vault claimed). In practice this filter rejects very few stations — `ignored_count` should stay near zero on a real fetch. It does **not** reduce what's downloaded over the air regardless (see [[Task-Fetch#Cost per cycle now vs. before]]) — it only avoids buffering/processing the (rare) non-target station's data further.
 
 ## A quirk worth knowing (`num_bikes_available` computation)
 

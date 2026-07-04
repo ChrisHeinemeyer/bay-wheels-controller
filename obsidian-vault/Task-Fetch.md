@@ -6,7 +6,7 @@ tags: [task, wifi, networking]
 
 Polls `https://gbfs.lyft.com/gbfs/2.3/bay/en/station_status.json` (the entire Bay Wheels network's live station status — hundreds of stations) every 60 seconds, forever.
 
-**Updated**: as of the persistent-connection change below, this task reuses one TLS connection across many fetch cycles instead of reconnecting every time — see [[Power-Management#Already implemented]] item "Persistent HTTPS connection across fetch cycles."
+**Updated (2026-07-04)**: this task now (1) reuses one TLS connection across many fetch cycles instead of reconnecting every time, and (2) lets the modem sleep (`WIFI_PS_MAX_MODEM`) for the entire life of that connection, not just the 60s idle gap — `WIFI_PS_NONE` is now confined to just the initial connect/handshake. Both changes verified on real hardware. See [[Power-Management#Already implemented]].
 
 ## Structure: outer connect loop, inner reuse loop
 
@@ -15,11 +15,10 @@ outer loop {                              // (re)establish a connection
     PS_NONE (DNS + TLS handshake needs the modem fully awake)
     client = HttpClient::new_with_tls(...)
     resource = client.resource(HOST_URL).await   // one TCP+TLS handshake
+    PS_MAX_MODEM                          // modem sleeps for the rest of this connection's life
 
     inner loop {                          // reuse `resource` for repeated GETs
-        PS_NONE
-        fetch_once(&mut resource)         // GET PATH, stream+parse body
-        PS_MAX_MODEM
+        fetch_once(&mut resource)         // GET PATH, stream+parse body — modem stays asleep
         if ConnectionLost: sleep 60s, break to outer loop (reconnect)
         else: sleep 60s, loop inner again (same connection)
     }
@@ -34,11 +33,11 @@ GBFS's server has no obligation to hold an idle connection open for a full 60s g
 
 ## Per-successful-cycle sequence (`fetch_once`)
 
-1. `esp_wifi_set_ps(WIFI_PS_NONE)` before the request (still forced on for every GET, not just the initial handshake — see [[Power-Management#Not yet done]] for why this stayed conservative rather than trying to let the modem sleep during reused-connection GETs too).
-2. `resource.get(PATH).headers(...).send(&mut headers_buf)` — no new DNS lookup, no new TLS handshake, just an HTTP/1.1 request over the already-open encrypted socket.
-3. Stream the response body in 1 KiB chunks through `StreamingStationParser` (see [[Task-Station-Parser]]), filling a fresh `[StationData; STATION_DATA_LEN]` array (610 slots) indexed directly by `station_idx` ordinal — this array is still recreated every cycle (not carried across), so a station that disappears from one response resets to `Default` for that cycle same as before.
-4. On stream completion: `STATION_DATA_SIGNAL.signal(...)`, stamp `STATUS.last_fetch_at`, `FETCH_SIGNAL.signal(now)`.
-5. `esp_wifi_set_ps(WIFI_PS_MAX_MODEM)` — let the modem sleep again for the 60s gap.
+The modem is **not** touched at all inside `fetch_once` anymore — it stays in whatever power-save state the outer loop set (`MAX_MODEM`, once past the initial connect). Verified on real hardware that a plain GET+response over a reused TLS connection tolerates this fine (see [[Power-Management#Already implemented]]).
+
+1. `resource.get(PATH).headers(...).send(&mut headers_buf)` — no new DNS lookup, no new TLS handshake, just an HTTP/1.1 request over the already-open encrypted socket, sent while the modem is asleep in `MAX_MODEM`.
+2. Stream the response body in 1 KiB chunks through `StreamingStationParser` (see [[Task-Station-Parser]]), filling a fresh `[StationData; STATION_DATA_LEN]` array (610 slots) indexed directly by `station_idx` ordinal — this array is still recreated every cycle (not carried across), so a station that disappears from one response resets to `Default` for that cycle same as before.
+3. On stream completion: `STATION_DATA_SIGNAL.signal(...)`, stamp `STATUS.last_fetch_at`, `FETCH_SIGNAL.signal(now)`.
 
 ## Buffers
 
@@ -54,4 +53,4 @@ That's 96 KiB of static RAM dedicated to this one task's networking, out of a 64
 
 ## Cost per cycle now vs. before
 
-Before this change, every 60s cycle paid for a full DNS lookup + TCP handshake + TLS handshake (asymmetric crypto — the most CPU-expensive thing this firmware does), all while the modem was forced fully awake for the whole exchange. Now, as long as the connection survives the idle gap, a cycle is just one HTTP GET + response over an already-open socket — no DNS, no handshake, no new asymmetric crypto. The one cost that's unchanged regardless of connection reuse: downloading the **entire** network-wide GBFS feed every cycle, not just the ~120 stations in `TARGET_STATIONS` (see [[Data-Model]]) — GBFS doesn't support server-side filtering. Conditional GET (`If-None-Match`/`If-Modified-Since`) was tested directly against the live endpoint and ruled out: the feed's `ttl` is 60s and it regenerates every 60s with a fresh `last_reported` timestamp per station, so at this poll cadence a conditional GET would almost never actually return a `304`. See [[Power-Management#Not yet done]] for the full writeup.
+Before this change, every 60s cycle paid for a full DNS lookup + TCP handshake + TLS handshake (asymmetric crypto — the most CPU-expensive thing this firmware does), all while the modem was forced fully awake for the whole exchange. Now, as long as the connection survives the idle gap, a cycle is just one HTTP GET + response over an already-open socket — no DNS, no handshake, no new asymmetric crypto. The one cost that's unchanged regardless of connection reuse: downloading the **entire** network-wide GBFS feed every cycle. Note this isn't actually "downloading everything to use a small fraction" — `TARGET_STATIONS` turns out to hold 611 entries (essentially every station in the network, see [[Data-Model#TARGET_STATIONS]]), so there's no server-side filtering to wish for even in principle; this device genuinely wants nearly all of the feed. Conditional GET (`If-None-Match`/`If-Modified-Since`) was tested directly against the live endpoint and ruled out for a different reason: the feed's `ttl` is 60s and it regenerates every 60s with a fresh `last_reported` timestamp per station, so at this poll cadence a conditional GET would almost never actually return a `304`. See [[Power-Management#Not yet done]] for the full writeup.
