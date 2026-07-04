@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f obsidian-vault/Home.md && jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:(\"Obsidian vault index (obsidian-vault/Home.md) for this repo \u2014 architecture overview:\\n\\n\" + .)}}' obsidian-vault/Home.md 2>/dev/null || true",
+            "statusMessage": "Loading obsidian-vault context..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; if printf '%s' \"$f\" | grep -Eq '(^|/)(src|web|tools)/' && ! printf '%s' \"$f\" | grep -Eq '(node_modules|/dist/|/generated/|obsidian-vault)'; then jq -n --arg f \"$f\" '{hookSpecificOutput: {hookEventName: \"PostToolUse\", additionalContext: (\"You just modified \" + $f + \" \u2014 if this changes behavior documented in obsidian-vault/, consider updating the relevant note(s) there.\")}}'; fi; } 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
