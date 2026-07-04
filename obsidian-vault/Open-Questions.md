@@ -1,0 +1,20 @@
+---
+tags: [notes, quirks]
+---
+
+# Open Questions / Quirks
+
+Things noticed while reading that seemed worth flagging — not necessarily bugs, but places where behavior might surprise someone (including future-me) who hasn't read the source closely. None of these have been changed; this is observation only.
+
+- **TLS certificate verification is disabled.** `fetch.rs`: `TlsVerify::None` — the HTTPS connection to `gbfs.lyft.com` is encrypted but not authenticated. A MITM on the network path (e.g. a captive portal, compromised AP) could serve arbitrary station data, though the impact is low (this only feeds an LED display, not a safety-critical system). Comment says "Skip certificate verification for now," implying it's a known, temporary shortcut rather than a permanent choice.
+- **Silent integer wraparound in the release profile.** `overflow-checks = false` ([[Build-and-CI#Profiles]]) combined with `station_parser.rs`'s `num_bikes_available - num_ebikes_available` (see [[Task-Station-Parser#A quirk worth knowing]]) means a malformed GBFS record with `ebikes > total_bikes` would wrap silently in release rather than panic in a way that's visible. Downstream clamping in `get_leds` prevents an out-of-bounds crash, but the displayed count would be wrong without any signal that something was off.
+- **`BoardId::Board0` and `Board1` have no `BOARD_STATION_MAP` entries** (`stations.rs:699-700`, commented out). Any board strapped to those IDs today resolves every touch to `StationIdx::None`. Confirm before assuming all 4 strap values are functional.
+- **Shift register grid capped at 6×6** by a hardcoded `>= 6 → IDLE` check (`shift_register.rs:65-70`) described in-code as a "temporary issue because not all lines are pulled up." If a board design ever needs more than 36 cells, this line is the first thing to revisit — it currently silently discards valid-looking rows/columns 6 and above rather than erroring.
+- **`serial_status_task` frame checksums exist because a data byte can collide with the magic byte** (`rssi == -85 == 0xAB`, `serial_status.rs:25`). This is handled correctly (checksum-based resync), but it's a reminder that the protocol has no length-prefixing — a receiver joining mid-stream must scan for magic+valid-checksum, not just magic.
+- **NVS partition offset/size are hardcoded** (`wifi_config.rs:12-14`) to the ESP-IDF default (`0x9000`, 24 KiB) with a comment noting this must match the actual partition table. Nothing in this codebase reads the partition table to confirm the assumption holds.
+- **WiFi credentials are stored unencrypted in NVS.** Anyone with flash read access gets the plaintext WiFi password. Given `use-env` builds also embed the password directly in the binary, this seems like an accepted tradeoff for a hobbyist/low-threat deployment rather than an oversight — but worth knowing if these boards are ever deployed somewhere physically accessible to untrusted people.
+- **Stray compiled `.js` files checked into `tools/src/`** alongside their `.ts` sources (see [[Companion-Tools#Stray compiled .js files]]) — not `.gitignore`d, not the live entrypoint. Likely safe to delete but wasn't touched here.
+- **GBFS station list used by the web UI is fetched live at deploy time**, not committed (`.github/workflows/deploy-web.yml` curls `station_information.json` from Lyft during the build) — see [[Build-and-CI#CI]]. This means the hosted web map's station list can drift from the firmware's `TARGET_STATIONS` between deploys if Lyft changes its station roster, with no automated check that they stay in sync.
+- **`main.rs`'s outer loop** (`Timer::after(Duration::from_secs(60))` forever) exists purely to satisfy `#[esp_rtos::main]`'s `-> !` signature after all real work has been handed off to spawned tasks — not a bug, just worth knowing it's a no-op keep-alive, not something doing periodic work itself.
+
+See also [[Power-Management#Not yet done]] for the power-specific list (kept separate since that one's about opportunities rather than correctness/security quirks).
