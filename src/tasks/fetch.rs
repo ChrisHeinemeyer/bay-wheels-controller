@@ -7,7 +7,7 @@ use embassy_net::{
 use embassy_time::{Duration, Instant, Timer};
 use reqwless::{
     client::{HttpClient, TlsConfig, TlsVerify},
-    request::{Method, RequestBuilder},
+    request::RequestBuilder,
 };
 use static_cell::StaticCell;
 
@@ -23,9 +23,19 @@ use crate::{
     },
 };
 
-// Start with a simple API that has a tiny response (~200 bytes)
-// const URL: &str = "https://api.open-notify.org/astros.json";
-const URL: &str = "https://gbfs.lyft.com/gbfs/2.3/bay/en/station_status.json";
+// Resource root: the TLS connection is established against this once and reused
+// across repeated fetches (avoids paying for a fresh handshake every 60s).
+const HOST_URL: &str = "https://gbfs.lyft.com";
+const PATH: &str = "/gbfs/2.3/bay/en/station_status.json";
+
+/// Outcome of one fetch attempt over an already-open connection.
+enum FetchOutcome {
+    /// Body streamed and parsed successfully.
+    Success,
+    /// The connection is now in an unknown state (write/read error) — reconnect from scratch.
+    ConnectionLost,
+}
+
 #[embassy_executor::task]
 pub async fn fetch_task(stack: &'static Stack<'static>) {
     // Wait for network to be ready
@@ -36,134 +46,134 @@ pub async fn fetch_task(stack: &'static Stack<'static>) {
         crate::dprintln!("Network is up! IP: {}", config.address);
     }
 
-    crate::dprintln!("DEBUG: Starting to initialize TCP client state...");
-
     // Create static buffers for TCP client state and TLS
     // TLS needs large buffers for handshake AND streaming - increase for large responses
     static TCP_CLIENT_STATE: StaticCell<TcpClientState<1, 32768, 32768>> = StaticCell::new();
     static TLS_RX_BUFFER: StaticCell<[u8; 32768]> = StaticCell::new();
     static TLS_TX_BUFFER: StaticCell<[u8; 32768]> = StaticCell::new();
 
-    crate::dprintln!("DEBUG: Initializing TCP state...");
     let tcp_state = TCP_CLIENT_STATE.init(TcpClientState::new());
     let tls_read_buffer = TLS_RX_BUFFER.init([0; 32768]);
     let tls_write_buffer = TLS_TX_BUFFER.init([0; 32768]);
 
-    // Create TCP client and DNS socket
-    crate::dprintln!("DEBUG: Creating TCP client...");
     let tcp_client = TcpClient::new(*stack, tcp_state);
-    crate::dprintln!("DEBUG: TCP client created");
-
-    crate::dprintln!("DEBUG: Creating DNS socket...");
     let dns_socket = DnsSocket::new(*stack);
-    crate::dprintln!("DEBUG: DNS socket created");
-
-    crate::dprintln!("DEBUG: Entering main loop...");
 
     loop {
-        // Disable modem power save for the duration of this fetch.  Maximum power save
-        // (listen_interval=10, ~1 s sleep) causes DNS UDP replies and TLS handshake
-        // packets to be dropped while the modem is sleeping.
+        // Disable modem power save for the connect: MAX_MODEM's ~1s sleep windows cause
+        // DNS UDP replies and TLS handshake packets to be dropped (see git history).
         unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_NONE) };
-        crate::dprintln!("");
-        crate::dprintln!("=== Fetching from {} ===", URL);
 
-        // Create TLS config (using a simple seed based on system time would be better, but using 0 for now)
         let tls_config = TlsConfig::new(
             0, // seed for RNG
             tls_read_buffer,
             tls_write_buffer,
             TlsVerify::None, // Skip certificate verification for now
         );
-
-        // Create HTTP client with TLS
         let mut client = HttpClient::new_with_tls(&tcp_client, &dns_socket, tls_config);
 
-        // Create request
-        match client.request(Method::GET, URL).await {
-            Ok(request) => {
-                // Add headers
-                let mut request =
-                    request.headers(&[("User-Agent", "ESP32-S3/1.0"), ("Accept", "*/*")]);
+        crate::dprintln!("");
+        crate::dprintln!("=== Connecting to {} ===", HOST_URL);
+        let mut resource = match client.resource(HOST_URL).await {
+            Ok(r) => r,
+            Err(e) => {
+                crate::dprintln!("✗ Error connecting: {:?}", e);
+                unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) };
+                Timer::after(Duration::from_secs(60)).await;
+                continue;
+            }
+        };
+        crate::dprintln!("✓ Connected — reusing this connection until it drops");
 
-                crate::dprintln!("Sending HTTPS request...");
+        // Reuse this one connection for repeated fetches until something goes wrong (the
+        // GBFS server is under no obligation to keep an idle connection open for 60s), at
+        // which point we fall out to the outer loop and reconnect from scratch.
+        loop {
+            unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_NONE) };
+            crate::dprintln!("=== Fetching {} ===", PATH);
 
-                // Small buffer just for HTTP headers/request metadata
-                let mut headers_buf = [0u8; 1024];
-                let mut station_data: [StationData; STATION_DATA_LEN] =
-                    [StationData::default(); STATION_DATA_LEN];
-                match request.send(&mut headers_buf).await {
-                    Ok(response) => {
-                        let status = response.status;
-                        crate::dprintln!("✓ Status: {:?}", status);
+            let outcome = fetch_once(&mut resource).await;
 
-                        // Get a reader to stream the body
-                        let mut body_reader = response.body().reader();
+            unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) };
 
-                        // Create streaming parser - processes chunks as they arrive
-                        let mut parser = StreamingStationParser::new(TARGET_STATIONS);
+            if let FetchOutcome::ConnectionLost = outcome {
+                crate::dprintln!("Reconnecting in 60 seconds...");
+                Timer::after(Duration::from_secs(60)).await;
+                break;
+            }
 
-                        let mut chunk_buf = [0u8; 1024]; // 1KB chunks
-                        let mut total_bytes = 0;
-                        let mut stations_found = 0;
+            crate::dprintln!("=== Request complete, waiting 60 seconds ===");
+            crate::dprintln!("");
+            Timer::after(Duration::from_secs(60)).await;
+        }
+    }
+}
 
-                        use embedded_io_async::Read as _;
+/// Sends one GET over an already-connected `resource` and streams+parses the response.
+/// Returns `ConnectionLost` on any transport-level error, signalling the caller to reconnect.
+async fn fetch_once<C>(resource: &mut reqwless::client::HttpResource<'_, C>) -> FetchOutcome
+where
+    C: embedded_io_async::Read + embedded_io_async::Write,
+{
+    let mut headers_buf = [0u8; 1024];
+    let mut station_data: [StationData; STATION_DATA_LEN] =
+        [StationData::default(); STATION_DATA_LEN];
 
-                        // Stream and parse chunks incrementally
-                        loop {
-                            match body_reader.read(&mut chunk_buf).await {
-                                Ok(0) => {
-                                    crate::dprintln!(
-                                        "✓ Stream complete! Total: {} bytes",
-                                        total_bytes
-                                    );
-                                    parser.finish();
-                                    STATION_DATA_SIGNAL.signal(station_data);
-                                    STATUS.lock().await.last_fetch_at = Some(Instant::now());
-                                    FETCH_SIGNAL.signal(Instant::now());
-                                    break;
-                                }
-                                Ok(n) => {
-                                    total_bytes += n;
-                                    // Parse this chunk incrementally
-                                    if let Ok(chunk_str) = core::str::from_utf8(&chunk_buf[..n]) {
-                                        let stations = parser.process_chunk(chunk_str);
-                                        stations_found += stations.len();
+    let request = resource
+        .get(PATH)
+        .headers(&[("User-Agent", "ESP32-S3/1.0"), ("Accept", "*/*")]);
 
-                                        // Print any stations found in this chunk
-                                        for station in stations.iter() {
-                                            if (station.station_idx as usize) < STATION_DATA_LEN {
-                                                station_data[station.station_idx as usize] =
-                                                    *station;
-                                            }
-                                        }
-                                    } else {
-                                        crate::dprintln!("  Warning: Invalid UTF-8 in chunk");
-                                    }
-                                }
-                                Err(e) => {
-                                    crate::dprintln!("✗ Error reading: {:?}", e);
-                                    break;
-                                }
-                            }
+    let response = match request.send(&mut headers_buf).await {
+        Ok(response) => response,
+        Err(e) => {
+            crate::dprintln!("✗ Error sending request: {:?}", e);
+            return FetchOutcome::ConnectionLost;
+        }
+    };
+
+    crate::dprintln!("✓ Status: {:?}", response.status);
+
+    let mut body_reader = response.body().reader();
+    let mut parser = StreamingStationParser::new(TARGET_STATIONS);
+
+    let mut chunk_buf = [0u8; 1024]; // 1KB chunks
+    let mut total_bytes = 0;
+    let mut stations_found = 0;
+
+    use embedded_io_async::Read as _;
+
+    // Stream and parse chunks incrementally
+    loop {
+        match body_reader.read(&mut chunk_buf).await {
+            Ok(0) => {
+                crate::dprintln!("✓ Stream complete! Total: {} bytes", total_bytes);
+                parser.finish();
+                crate::dprintln!("✓ Found {} matching stations total", stations_found);
+                STATION_DATA_SIGNAL.signal(station_data);
+                STATUS.lock().await.last_fetch_at = Some(Instant::now());
+                FETCH_SIGNAL.signal(Instant::now());
+                return FetchOutcome::Success;
+            }
+            Ok(n) => {
+                total_bytes += n;
+                // Parse this chunk incrementally
+                if let Ok(chunk_str) = core::str::from_utf8(&chunk_buf[..n]) {
+                    let stations = parser.process_chunk(chunk_str);
+                    stations_found += stations.len();
+
+                    for station in stations.iter() {
+                        if (station.station_idx as usize) < STATION_DATA_LEN {
+                            station_data[station.station_idx as usize] = *station;
                         }
-
-                        crate::dprintln!("✓ Found {} matching stations total", stations_found);
                     }
-                    Err(e) => {
-                        crate::dprintln!("✗ Error sending request: {:?}", e);
-                    }
+                } else {
+                    crate::dprintln!("  Warning: Invalid UTF-8 in chunk");
                 }
             }
             Err(e) => {
-                crate::dprintln!("✗ Error creating request: {:?}", e);
+                crate::dprintln!("✗ Error reading: {:?}", e);
+                return FetchOutcome::ConnectionLost;
             }
         }
-
-        crate::dprintln!("=== Request complete, waiting 60 seconds ===");
-        crate::dprintln!("");
-        // Re-enable Maximum power save during the idle gap so the modem can sleep.
-        unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) };
-        Timer::after(Duration::from_secs(60)).await;
     }
 }
