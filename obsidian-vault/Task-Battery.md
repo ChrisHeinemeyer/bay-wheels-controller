@@ -15,10 +15,19 @@ Simplest task in the codebase. Every 5 seconds:
 ```rust
 let voltage_div_ratio = 22.0 / (100.0 + 22.0);   // 22kΩ low-side, 100kΩ high-side divider
 let battery_mv = adc_mv / voltage_div_ratio;      // undo the divider
-// 3× AA alkaline: ~3000mV depleted → ~4500mV fresh
-let pct = ((battery_mv - 3000.0) / (4500.0 - 3000.0) * 100.0).clamp(0.0, 100.0);
 ```
 
-The 3000–4500mV range is a linear approximation of alkaline AA discharge, which is not actually linear (alkalines hold voltage relatively flat for most of their life, then fall off a cliff near the end) — so this percentage should be read as "rough state of charge," most accurate near the low end, not as a precise fuel gauge. Worth knowing if the reported battery % seems to sit near 100 for a long time and then drop quickly.
+`battery_mv` (pack voltage, 3 cells in series) is then mapped to a percentage via
+`DISCHARGE_CURVE_MV`, a 15-point (pack mV, percent) lookup table, highest voltage first, with
+linear interpolation between the two bracketing breakpoints (clamped to 100%/0% outside the
+table's range). This replaced an earlier straight-line map between a depleted and fresh
+voltage, which overstated capacity through alkaline's long flat plateau and understated how
+little was left once voltage started sliding near depletion.
+
+The table is derived from a commonly-cited single-cell alkaline discharge curve
+(1.50V/1.40V/1.30V/1.20V/1.10V/1.00V/0.90V at 100/83/62/42/23/8/0%), scaled ×3 for the series
+pack and interpolated to finer steps — still an approximation (real discharge shape depends on
+drain current, temperature, and cell-to-cell balance), but it should track actual state of
+charge more closely than the old linear map, especially through the mid-range plateau.
 
 See [[Power-Management]] for whether 5s polling resolution is worth the periodic wakeup it costs.
