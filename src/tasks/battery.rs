@@ -18,7 +18,7 @@ pub async fn battery_task(
         crate::dprintln!("Battery ADC value: {} mV", adc_mv);
         let battery_pct = convert_to_percentage(adc_mv);
         STATUS.lock().await.battery_pct = battery_pct;
-        Timer::after(Duration::from_secs(5)).await;
+        Timer::after(Duration::from_secs(30)).await;
     }
 }
 
