@@ -6,9 +6,9 @@ use esp_wifi_sys::include::esp_wifi_set_max_tx_power;
 use crate::tasks::signals::STATUS;
 
 /// Starting TX power (quarter-dBm). Used for initial connect and reconnects.
-const TX_POWER_MAX: i8 = 84; // 21 dBm
+const TX_POWER_MAX: i8 = 60; // 15 dBm
 /// Minimum TX power the adaptive logic will probe down to (user-tested safe floor).
-const TX_POWER_MIN: i8 = 60; // 15.0 dBm
+const TX_POWER_MIN: i8 = 40; // 10.0 dBm
 /// Step size for each downward probe (quarter-dBm = 0.5 dBm per step).
 const TX_POWER_STEP: i8 = 2;
 /// Number of 5-second maintenance ticks to stay stable before stepping down.
