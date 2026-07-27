@@ -19,8 +19,8 @@ loop {
     fetch_age = now - fetch_time
     if station != last_station {                 // only touches SPI on actual change
         maybe pull fresh STATION_DATA_SIGNAL.try_take()
-        if station == None: blank all 12 LEDs
-        else: compute LEDs for this station + fetch-age indicator, write via SPI
+        if station == None: chip_enable(false)    // blanks display + cuts driver quiescent draw
+        else: chip_enable(true) if coming from idle, compute LEDs, write via SPI
     }
     Timer::after(50ms)
 }

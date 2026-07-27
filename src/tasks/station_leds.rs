@@ -43,14 +43,18 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
                 station_data = updated_station_data;
                 crate::dprintln!("fresh data!");
             }
+            let was_idle = last_station == StationIdx::None;
             last_station = station;
             if station == StationIdx::None {
                 STATUS.lock().await.led_states = [(0, 0, 0); 12];
-                al5887
-                    .set_all_leds_brightness_color(0, Color::new(0, 0, 0))
-                    .await
-                    .unwrap();
+                // Chip-disable (rather than zeroing all 12 LEDs' registers) both blanks the
+                // display and cuts the driver's own quiescent draw during idle — see
+                // Power-Management.md#Not yet done item 3.
+                al5887.set_chip_enable(false).await.unwrap();
             } else {
+                if was_idle {
+                    al5887.set_chip_enable(true).await.unwrap();
+                }
                 let mut leds = get_leds(station, &station_data);
                 {
                     let mut guard = STATUS.lock().await;
