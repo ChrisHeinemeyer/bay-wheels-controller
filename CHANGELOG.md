@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-07-27
+
+### Changed
+
+- AL5887 LED driver chip is now disabled (`set_chip_enable(false)`) when the selection goes
+  idle, instead of just zeroing all 12 LEDs' registers — cuts the driver's own quiescent draw,
+  not just LED current, and re-enables it only when coming back out of idle.
+- `battery_task` now samples every 30 seconds instead of every 5, removing a periodic wakeup
+  for negligible loss of freshness.
+
+### Fixed
+
+- LEDs left on from a previously selected station could stay lit after selecting a new one.
+  `Al5887::set_vec_led` only writes registers for the LEDs it's given and never clears ones
+  that aren't in the new list, so switching to a station with fewer lit LEDs than the last one
+  left the extras stuck on. All 12 LEDs are now explicitly zeroed on touch-release (going
+  idle), so they're already off by the time the next selection lights new ones.
+
 ## [1.2.0] - 2026-07-26
 
 ### Added
@@ -150,7 +168,8 @@ Initial firmware bring-up.
 - Switched target chip from ESP32-C6 to ESP32-S3.
 - Replaced heap-allocated `alloc::vec::Vec` with `heapless::Vec`.
 
-[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v0.1.7...v1.0.0

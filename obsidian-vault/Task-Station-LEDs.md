@@ -19,12 +19,18 @@ loop {
     fetch_age = now - fetch_time
     if station != last_station {                 // only touches SPI on actual change
         maybe pull fresh STATION_DATA_SIGNAL.try_take()
-        if station == None: chip_enable(false)    // blanks display + cuts driver quiescent draw
-        else: chip_enable(true) if coming from idle, compute LEDs, write via SPI
+        if station == None: zero all 12 LEDs, then chip_enable(false)   // see note below
+        else:
+            if coming from idle: chip_enable(true)
+            compute LEDs, write via SPI
     }
     Timer::after(50ms)
 }
 ```
+
+**Why zero all LEDs on touch-release (going idle) rather than on the way back in:** `Al5887::set_vec_led` only writes registers for the LEDs present in the `Vec` it's given — it has no memory of the previous frame, so it can't turn off a LED that was lit before but isn't in the new list. `chip_enable(false)`/`(true)` (the idle blank/unblank) doesn't clear the underlying brightness/color registers either — it just gates the chip's output — so a register left lit by the previously-selected station would light right back up the instant the chip re-enables, before `set_vec_led` overwrites only the new station's subset. Clearing at touch-release means the registers are already zero by the time the next selection's `chip_enable(true)` fires, so no separate clear step is needed on the way back in.
+
+This only needs to run when going idle, not on a hypothetical direct station→station switch, because [[Task-Input-Read]]'s touch grid can only register one contact at a time — the stylus/finger must be lifted (driving the input back to `Row::IDLE`/`Column::IDLE`, i.e. `StationIdx::None`) before a different station can be touched. So in practice every station change passes through `StationIdx::None` first, and the registers are always freshly zeroed before the next selection lights new ones.
 
 Because [[Task-Input-Read]] signals `STATION_SIGNAL` on *every* poll (not just on change), this loop wakes roughly as often as the input task polls (150–500ms) even when nothing visually changes — the `station != last_station` guard is what prevents redundant SPI writes, not the wait itself.
 

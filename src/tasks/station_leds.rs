@@ -47,8 +47,15 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
             last_station = station;
             if station == StationIdx::None {
                 STATUS.lock().await.led_states = [(0, 0, 0); 12];
-                // Chip-disable (rather than zeroing all 12 LEDs' registers) both blanks the
-                // display and cuts the driver's own quiescent draw during idle — see
+                // Zero every LED's registers on touch-release — set_vec_led only writes the
+                // LEDs it's given, so without this a LED left lit by the just-deselected
+                // station would relight the instant the chip re-enables for the next one.
+                al5887
+                    .set_all_leds_brightness_color(0, Color::new(0, 0, 0))
+                    .await
+                    .unwrap();
+                // Chip-disable (rather than relying on the zeroed registers alone) both blanks
+                // the display and cuts the driver's own quiescent draw during idle — see
                 // Power-Management.md#Not yet done item 3.
                 al5887.set_chip_enable(false).await.unwrap();
             } else {
