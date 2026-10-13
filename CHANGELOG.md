@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-12
+
+### Added
+
+- `light-sleep` feature: the CPU sleeps between fetch cycles when the radio is off. Idle
+  current decreased from 55 mA to 14 mA.
+- Self-recovery: a panic or a hang resets the board. The next boot logs the reason.
+- `log-server` feature: each fetch cycle sends a status report to `LOG_SERVER` in `.env`.
+- `homeassistant/`: a Home Assistant add-on that shows the reports on port 8099.
+- `sleep-trace` feature: counts task wakeups during sleep, for diagnosis.
+
+### Changed
+
+- The radio stops between fetch cycles. It no longer keeps the connection open.
+- DHCP retries after 1 s, not 10 s. Radio-on time per cycle decreased from 14 s to 7 s.
+- The serial status task wakes the CPU less often when no USB host is connected.
+- The TCP transmit buffer is 4 KB, not 32 KB. The main stack increased to 136 KB.
+
+### Fixed
+
+- The board froze until a power cycle after a panic or a hang.
+- The TLS handshake could overflow the main stack.
+- A stalled download kept the radio on. Fetches now stop after 90 s.
+
 ## [1.2.1] - 2026-07-27
 
 ### Changed
@@ -168,7 +192,8 @@ Initial firmware bring-up.
 - Switched target chip from ESP32-C6 to ESP32-S3.
 - Replaced heap-allocated `alloc::vec::Vec` with `heapless::Vec`.
 
-[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.0.0...v1.1.0
