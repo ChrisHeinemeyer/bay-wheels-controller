@@ -1,16 +1,17 @@
 [features]
+# Light sleep is what makes battery life work; opt out with --no-default-features.
+default = ["light-sleep"]
 # Route dprintln! to the USB serial port instead of RTT.
 # When set, serial_status_task is not spawned (USB serial is used for text output).
 debug-serial = []
 # Load SSID and PASSWORD from .env at build time (for development).
 # Copy .env.dist to .env and set your WiFi credentials.
 use-env = []
-# Light-sleep the CPU during scheduler idle gaps via a custom esp-rtos idle hook.
-# Off by default. WARNING: ESP32-S3 has no USB-Serial-JTAG wake source at the
-# hardware register level, so a light-sleep build is unresponsive to
-# probe-rs/espflash while asleep. Escape hatches: hold the provisioning button
-# (GPIO2) to force a wake window, or strap GPIO0 to GND at reset to force ROM
-# download mode (works regardless of firmware state). See src/power.rs.
+# Light-sleep the CPU between tasks while the radio is off (src/power.rs). On by
+# default. USB-Serial-JTAG stops while the CPU sleeps, so probe-rs/espflash can
+# only attach in a no-sleep window: the first 20s after reset, or 30s after a
+# GPIO2 (provisioning button) press. Last resort: strap GPIO0 to GND at reset
+# for ROM download mode.
 light-sleep = []
 # Diagnostic: count embassy task polls per task while light-sleeping, printed
 # with the light-sleep stats on wake, to find what keeps waking the CPU.
@@ -112,3 +113,10 @@ overflow-checks  = false
 unwrap_used = "warn" 
 # Treat usage of expect() as a warning
 expect_used = "warn" 
+
+[patch.crates-io]
+# esp-rtos 0.2.0 with the esp-radio timer leak fix backported from 0.3.0
+# (0.3.0 needs esp-hal 1.1). See the PATCHED comment in
+# patches/esp-rtos-0.2.0/src/esp_radio/timer_queue.rs. Drop this once on
+# esp-rtos >= 0.3.0.
+esp-rtos = { path = "patches/esp-rtos-0.2.0" }

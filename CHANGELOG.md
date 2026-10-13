@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-13
+
+### Added
+
+- Panic resets now save a backtrace. The next status report sends it.
+- `scripts/symbolize.py` converts a backtrace into functions and source lines. Run it with
+  `uv run`.
+- `scripts/flash.sh` keeps a copy of each flashed ELF in `firmware-archive/`.
+- Status reports show the free heap at each step of the fetch cycle.
+
+### Changed
+
+- `light-sleep` is now a default feature. Use `--no-default-features` to turn it off.
+
+### Fixed
+
+- Memory leak: the board ran out of memory and reset every 2.5 hours. The cause was an
+  esp-rtos 0.2.0 bug that leaked 48 bytes per deleted radio timer. We use a patched copy
+  until we move to esp-rtos 0.3.0.
+
 ## [1.3.0] - 2026-10-12
 
 ### Added
@@ -192,7 +212,8 @@ Initial firmware bring-up.
 - Switched target chip from ESP32-C6 to ESP32-S3.
 - Replaced heap-allocated `alloc::vec::Vec` with `heapless::Vec`.
 
-[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.1.0...v1.2.0

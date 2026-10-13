@@ -39,13 +39,28 @@ pub struct CycleReport {
     pub fetch_ms: u32,
     /// Whole radio-on window of the previous cycle (this one's isn't over).
     pub prev_radio_on_ms: u32,
+    pub heap: HeapSteps,
+}
+
+/// Free heap (bytes) at each step of the WiFi cycle, to localize a leak.
+#[derive(Default)]
+pub struct HeapSteps {
+    /// Previous cycle, after `teardown()` (radio stopped, nothing in flight).
+    pub prev_after_teardown: u32,
+    /// This cycle, before `start_async()`.
+    pub start: u32,
+    pub after_start: u32,
+    pub after_connect: u32,
+    pub after_dhcp: u32,
+    /// After DNS + TLS + download (connection dropped).
+    pub after_fetch: u32,
 }
 
 pub async fn send_report<const N: usize, const TX: usize, const RX: usize>(
     tcp: &TcpClient<'static, N, TX, RX>,
     cycle: &CycleReport,
 ) {
-    let mut body = heapless::String::<1280>::new();
+    let mut body = heapless::String::<1536>::new();
     let has_reset_summary = build_body(&mut body, cycle).await;
 
     match with_timeout(POST_TIMEOUT, post(tcp, &body)).await {
@@ -99,7 +114,7 @@ async fn post<const N: usize, const TX: usize, const RX: usize>(
 
 /// Fills `out` with the JSON report. Returns whether it carries the pending
 /// reset summary (so it can be marked delivered on success).
-async fn build_body(out: &mut heapless::String<1280>, cycle: &CycleReport) -> bool {
+async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bool {
     let (board, battery_pct, battery_adc_mv, rssi, tx_power, last_fetch_at) = {
         let s = STATUS.lock().await;
         (
@@ -143,7 +158,9 @@ async fn build_body(out: &mut heapless::String<1280>, cycle: &CycleReport) -> bo
         out,
         "\"connect_ms\":{},\"dhcp_ms\":{},\"fetch_ms\":{},\"prev_radio_on_ms\":{},\
          \"slept_ms_total\":{},\"naps_total\":{},\"near_deadline_waits_total\":{},\
-         \"spurious_ext0_total\":{},\"rc_scale_ppm\":{},\"heap_free\":{}",
+         \"spurious_ext0_total\":{},\"rc_scale_ppm\":{},\"heap_free\":{},\
+         \"heap_prev_after_teardown\":{},\"heap_cycle_start\":{},\"heap_after_start\":{},\
+         \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{}",
         cycle.connect_ms,
         cycle.dhcp_ms,
         cycle.fetch_ms,
@@ -154,6 +171,12 @@ async fn build_body(out: &mut heapless::String<1280>, cycle: &CycleReport) -> bo
         sleep.spurious_ext0,
         sleep.rc_scale_ppm,
         esp_alloc::HEAP.free(),
+        cycle.heap.prev_after_teardown,
+        cycle.heap.start,
+        cycle.heap.after_start,
+        cycle.heap.after_connect,
+        cycle.heap.after_dhcp,
+        cycle.heap.after_fetch,
     );
 
     let mut summary = heapless::String::<256>::new();
@@ -162,6 +185,15 @@ async fn build_body(out: &mut heapless::String<1280>, cycle: &CycleReport) -> bo
         let _ = out.push_str(",\"reset\":\"");
         push_json_escaped(out, &summary);
         let _ = out.push('"');
+        let mut bt = heapless::Vec::<u32, { watchdog::BACKTRACE_WORDS }>::new();
+        watchdog::reset_backtrace(&mut bt);
+        if !bt.is_empty() {
+            let _ = out.push_str(",\"backtrace\":[");
+            for (i, pc) in bt.iter().enumerate() {
+                let _ = write!(out, "{}\"{:#010x}\"", if i == 0 { "" } else { "," }, pc);
+            }
+            let _ = out.push(']');
+        }
     }
     let _ = out.push('}');
     has_reset_summary

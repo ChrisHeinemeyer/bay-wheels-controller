@@ -1,6 +1,7 @@
 #![no_std]
-// `waiti` in power.rs's idle hook; same feature esp-hal/esp-rtos enable.
-#![cfg_attr(feature = "light-sleep", feature(asm_experimental_arch))]
+// Inline asm: `waiti` in power.rs's idle hook and the register-window spill in
+// watchdog.rs's backtrace; same feature esp-hal/esp-rtos enable.
+#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]
 
 extern crate alloc;
 

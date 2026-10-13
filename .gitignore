@@ -5,6 +5,8 @@
 debug/
 target/
 *.bin
+# Flashed ELFs by version, for symbolizing field backtraces (scripts/flash.sh)
+firmware-archive/
 
 # Editor configuration
 .vscode/

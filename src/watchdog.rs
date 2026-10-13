@@ -30,10 +30,16 @@ pub enum ResetCause {
     InputStall = 3,
 }
 
-const RECORD_MAGIC: u32 = 0xB1CE_5EED;
+/// Bumped whenever the record layout changes, so a record left in RTC RAM by
+/// older firmware isn't misread after flashing.
+const RECORD_MAGIC: u32 = 0xB1CE_5EE2;
 const FILE_WORDS: usize = 12; // 48 bytes
 const MSG_WORDS: usize = 16; // 64 bytes
-const RECORD_WORDS: usize = 4 + FILE_WORDS + MSG_WORDS;
+/// Return addresses from `capture_backtrace`, innermost first. Symbolize on the host with `scripts/symbolize.py` against the ELF of
+/// the reported `fw` version (archived by `scripts/flash.sh`).
+pub const BACKTRACE_WORDS: usize = 16;
+const BT_OFFSET: usize = 4 + FILE_WORDS + MSG_WORDS;
+const RECORD_WORDS: usize = BT_OFFSET + 1 + BACKTRACE_WORDS;
 
 /// `[magic, cause, line, uptime_s, file.., message..]`, as words so it is
 /// `AnyBitPattern` without extra derives. RTC fast RAM survives
@@ -55,6 +61,18 @@ static mut BOOT_COUNT: [u32; 2] = [0; 2];
 static RESET_SUMMARY: critical_section::Mutex<core::cell::RefCell<heapless::String<256>>> =
     critical_section::Mutex::new(core::cell::RefCell::new(heapless::String::new()));
 static RESET_SUMMARY_PENDING: AtomicBool = AtomicBool::new(false);
+/// Backtrace of the panic that ended the previous boot, delivered with the
+/// reset summary.
+static RESET_BACKTRACE: critical_section::Mutex<
+    core::cell::RefCell<heapless::Vec<u32, BACKTRACE_WORDS>>,
+> = critical_section::Mutex::new(core::cell::RefCell::new(heapless::Vec::new()));
+
+/// Copies the previous boot's panic backtrace into `out` (empty if none).
+pub fn reset_backtrace(out: &mut heapless::Vec<u32, BACKTRACE_WORDS>) {
+    critical_section::with(|cs| {
+        out.clone_from(&RESET_BACKTRACE.borrow_ref(cs));
+    });
+}
 
 pub fn boot_count() -> u32 {
     // SAFETY: plain word read; only written once at boot.
@@ -171,6 +189,18 @@ pub fn record_and_reset(
         let mut msg = ByteBuf::<{ MSG_WORDS * 4 }>::new();
         let _ = msg.write_fmt(message);
         write_bytes(rec.add(4 + FILE_WORDS), MSG_WORDS, msg.as_bytes());
+        // Only panics get a backtrace; for stall resets it would just show
+        // this watchdog loop. Capture walks the stack without allocating, so
+        // it works for out-of-memory panics too.
+        let mut frames = 0;
+        if matches!(cause, ResetCause::Panic) {
+            let mut pcs = [0u32; BACKTRACE_WORDS];
+            frames = capture_backtrace(&mut pcs);
+            for (i, pc) in pcs[..frames].iter().enumerate() {
+                rec.add(BT_OFFSET + 1 + i).write_volatile(*pc);
+            }
+        }
+        rec.add(BT_OFFSET).write_volatile(frames as u32);
         rec.write_volatile(RECORD_MAGIC);
     }
     esp_hal::system::software_reset()
@@ -231,6 +261,21 @@ pub fn report_last_reset() {
             uptime_s,
             as_str(&msg)
         );
+        let frames = (rec.add(BT_OFFSET).read_volatile() as usize).min(BACKTRACE_WORDS);
+        critical_section::with(|cs| {
+            let mut bt = RESET_BACKTRACE.borrow_ref_mut(cs);
+            bt.clear();
+            for i in 0..frames {
+                let _ = bt.push(rec.add(BT_OFFSET + 1 + i).read_volatile());
+            }
+        });
+        for i in 0..frames {
+            crate::dprintln!(
+                "  backtrace #{}: {:#010x}",
+                i,
+                rec.add(BT_OFFSET + 1 + i).read_volatile()
+            );
+        }
         set_reset_summary(format_args!(
             "Firmware reset itself ({}) after {}s uptime at {}:{}: {}",
             cause,
@@ -335,5 +380,67 @@ impl<const N: usize> core::fmt::Write for ByteBuf<N> {
         self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
         self.len += n;
         Ok(())
+    }
+}
+
+/// Walks the Xtensa windowed-ABI call stack into `out` (return addresses,
+/// innermost first) and returns how many were found. Never allocates.
+///
+/// Adapted from esp-backtrace 0.18.1 (`src/xtensa.rs`, MIT OR Apache-2.0).
+/// The crate itself can't be used without pulling in a println/defmt backend.
+#[inline(never)]
+#[cold]
+fn capture_backtrace(out: &mut [u32]) -> usize {
+    /// ESP32-S3 internal DRAM; a frame pointer outside it ends the walk.
+    const DRAM: core::ops::Range<u32> = 0x3FC8_8000..0x3FD0_0000;
+    /// Report the `callxN` itself rather than the instruction after it.
+    const RA_OFFSET: u32 = 3;
+
+    let mut fp = caller_stack_pointer();
+    let mut n = 0;
+    while n < out.len() && DRAM.contains(&fp) {
+        // SAFETY: `fp` is inside DRAM; the windowed ABI keeps the caller's
+        // a0 (return address) and a1 (stack pointer) at fp-16 and fp-12.
+        let (ra, next_fp) = unsafe {
+            let p = fp as *const u32;
+            (p.offset(-4).read_volatile(), p.offset(-3).read_volatile())
+        };
+        // The top two bits of a windowed return address hold the call
+        // increment, not the address.
+        let pc = (ra & 0x3fff_ffff) | 0x4000_0000;
+        if pc == 0x4000_0000 || !DRAM.contains(&next_fp) {
+            break;
+        }
+        out[n] = pc - RA_OFFSET;
+        n += 1;
+        fp = next_fp;
+    }
+    n
+}
+
+/// The caller's stack pointer, after spilling every live register window to
+/// the stack so the saved a0/a1 of all frames are actually in memory.
+#[inline(never)]
+#[cold]
+fn caller_stack_pointer() -> u32 {
+    let sp: u32;
+    // SAFETY: the rotations total 16, so the window ends where it started;
+    // each `rotw` past a live window forces a window-overflow spill.
+    unsafe {
+        core::arch::asm!(
+            "mov {0}, a1",
+            "add a12,a12,a12",
+            "rotw 3",
+            "add a12,a12,a12",
+            "rotw 3",
+            "add a12,a12,a12",
+            "rotw 3",
+            "add a12,a12,a12",
+            "rotw 3",
+            "add a12,a12,a12",
+            "rotw 4",
+            out(reg) sp
+        );
+        ((sp - 12) as *const u32).read_volatile()
     }
 }

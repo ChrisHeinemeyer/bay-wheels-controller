@@ -89,9 +89,21 @@ pub async fn fetch_task(
     let mut success_streak: u32 = 0;
     #[cfg(feature = "log-server")]
     let (mut fetch_ok_total, mut fetch_fail_total, mut prev_radio_on_ms) = (0u32, 0u32, 0u32);
+    // Free heap after the previous cycle's teardown (radio stopped, nothing
+    // in flight) — with `heap.start` below, the clean per-cycle leak signal.
+    #[cfg(feature = "log-server")]
+    let mut prev_heap_after_teardown = 0u32;
+    #[cfg(feature = "log-server")]
+    let heap = || esp_alloc::HEAP.free() as u32;
 
     loop {
         let cycle_start = Instant::now();
+        #[cfg(feature = "log-server")]
+        let mut heap_steps = super::telemetry::HeapSteps {
+            start: heap(),
+            prev_after_teardown: prev_heap_after_teardown,
+            ..Default::default()
+        };
         // Hold off CPU light-sleep (src/power.rs) from here until teardown()
         // confirms the radio is stopped.
         RADIO_ACTIVE.store(true, Ordering::Release);
@@ -110,6 +122,10 @@ pub async fn fetch_task(
                 continue;
             }
         }
+        #[cfg(feature = "log-server")]
+        {
+            heap_steps.after_start = heap();
+        }
 
         let connected_rssi = match wifi_connect::connect(&mut controller, tx_power).await {
             Ok(rssi) => rssi,
@@ -124,6 +140,10 @@ pub async fn fetch_task(
         };
         crate::dprintln!("✓ Connected (RSSI: {})", connected_rssi);
         let connected_at = Instant::now();
+        #[cfg(feature = "log-server")]
+        {
+            heap_steps.after_connect = heap();
+        }
 
         // Disable modem power save for DHCP + the TLS handshake: MAX_MODEM's ~1s
         // sleep windows cause DNS UDP replies and TLS handshake packets to be
@@ -147,6 +167,10 @@ pub async fn fetch_task(
             crate::dprintln!("Network is up! IP: {}", config.address);
         }
         let dhcp_at = Instant::now();
+        #[cfg(feature = "log-server")]
+        {
+            heap_steps.after_dhcp = heap();
+        }
 
         let outcome = match with_timeout(
             FETCH_TIMEOUT,
@@ -169,6 +193,7 @@ pub async fn fetch_task(
             } else {
                 fetch_fail_total += 1;
             }
+            heap_steps.after_fetch = heap();
             let ms = |from: Instant, to: Instant| to.duration_since(from).as_millis() as u32;
             let report = super::telemetry::CycleReport {
                 fetch_ok,
@@ -178,6 +203,7 @@ pub async fn fetch_task(
                 dhcp_ms: ms(connected_at, dhcp_at),
                 fetch_ms: ms(dhcp_at, Instant::now()),
                 prev_radio_on_ms,
+                heap: heap_steps,
             };
             super::telemetry::send_report(&tcp_client, &report).await;
         }
@@ -189,6 +215,7 @@ pub async fn fetch_task(
         #[cfg(feature = "log-server")]
         {
             prev_radio_on_ms = Instant::now().duration_since(cycle_start).as_millis() as u32;
+            prev_heap_after_teardown = heap();
         }
         #[cfg(not(feature = "log-server"))]
         let _ = (cycle_start, connected_at, dhcp_at);

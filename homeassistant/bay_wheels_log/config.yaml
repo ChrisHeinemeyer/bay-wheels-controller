@@ -1,5 +1,5 @@
 name: Bay Wheels Log
-version: "1.0.2"
+version: "1.0.3"
 slug: bay_wheels_log
 description: Receives and displays telemetry POSTed by the bay-wheels-controller firmware (log-server feature).
 arch:

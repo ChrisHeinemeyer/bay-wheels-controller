@@ -22,3 +22,11 @@ The receiver is a Home Assistant local add-on in `homeassistant/` (deployed to H
 ## Stack budget
 
 The main stack is whatever DRAM is left after statics. Reading `PanicInfo` at all makes every panic site's formatting live, and esp-hal's linker script puts the `Debug` lookup tables that pulls in into `.data` (~6KB). That was paid for by cutting the fetch task's TCP **TX** buffer from 32KB to 4KB (it only carries the GET, the TLS handshake and the telemetry POST). The main stack went from ~114KB to ~136KB, which ends the <7KB-headroom problem noted in [[Power-Management]].
+
+## Backtraces (v1.3.1)
+
+The panic handler also walks the Xtensa register-window stack and saves up to 16 return addresses with the crash record. The walker is vendored from esp-backtrace 0.18.1, because the crate insists on a println/defmt backend. The next report sends them as `backtrace`. `scripts/flash.sh` (the cargo runner) archives every flashed ELF as `firmware-archive/<git describe>.elf`. `uv run scripts/symbolize.py` matches a report's `fw` to that ELF and prints function + file:line. File:line comes from scanning the DWARF line tables with pyelftools, because in these fat-LTO builds the address index is wrong and addr2line / llvm-dwarfdump return `??`. CPU exceptions and stack-guard hits still only point into esp-hal's handler.
+
+## The 2.5-hour out-of-memory reset (fixed in v1.3.1)
+
+Telemetry showed every reset was `memory allocation of 40 bytes failed` after ~8,900s, with free heap at cycle start falling ~200 bytes per cycle. Cause: esp-rtos 0.2.0 `Timer::delete` (esp-radio's timers for the WiFi blob) marked every timer that wasn't in the queue as "drop later" and forgot it. Only timers the queue was processing ever got dropped, so a deleted one-shot that had already fired leaked ~48 bytes. The blob creates and deletes several per connect cycle, and that only began when Stage 1 started tearing WiFi down every cycle. Upstream fixed it in esp-rtos 0.3.0 (#4541), but that needs esp-hal 1.1. So `patches/esp-rtos-0.2.0` carries a one-line backport via `[patch.crates-io]`; drop it once on esp-rtos >= 0.3.0. Confirmed on hardware: free heap at cycle start is flat.

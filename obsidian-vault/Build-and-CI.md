@@ -22,7 +22,11 @@ obsidian-vault/        ← this vault (not yet committed/gitignored as of when t
 - **`debug-serial`** — routes `dprintln!` to USB-Serial-JTAG (blocking) instead of RTT, and *disables spawning* [[Task-Serial-Status]] (mutually exclusive: both want the same USB peripheral for different purposes — text debug log vs. binary status frame). Useful for flashing/debugging without a JTAG probe attached; not meant for the shipped firmware since it forfeits the web UI's live status.
 - **`use-env`** — loads `SSID`/`PASSWORD` from a `.env` file at *compile* time (via `build.rs`) instead of from NVS at runtime. See [[Provisioning-and-Config#Two credential paths at compile time]] — don't ship a `use-env` binary, it embeds the WiFi password.
 
-Neither feature is on by default; the default build path is: NVS credentials + RTT logging + `serial_status_task` spawned.
+- **`light-sleep`** (default since v1.3.1): light-sleeps the CPU between tasks while the radio is off ([[Power-Management]]). USB-Serial-JTAG is down while asleep, so probe-rs/espflash only attach in the first 20s after reset or for 30s after a GPIO2 press. Opt out with `--no-default-features`.
+- **`log-server`**: POSTs a JSON status report to `LOG_SERVER` (from `.env`) once per fetch cycle. See [[Telemetry-and-Recovery]].
+- **`sleep-trace`**: diagnostic. Implies `light-sleep` and counts embassy task polls while asleep.
+
+The default build is NVS credentials + RTT logging + `serial_status_task` + light sleep. That is also what `release.yml` ships. Typical dev build: `cargo run --release --features use-env,log-server`.
 
 ## Profiles
 

@@ -170,15 +170,29 @@ def render_page():
         f"{sparkline([pack_mv(r) for r in window])}</div>"
         f'<div class="chart"><div class="label">Radio-on per cycle (s)</div>'
         f'{sparkline([(r.get("prev_radio_on_ms") or 0) / 1000 or None for r in window])}</div>'
+        f'<div class="chart"><div class="label">Free heap at cycle start (bytes)</div>'
+        f'{sparkline([r.get("heap_cycle_start") for r in window])}</div>'
         f'<div class="chart"><div class="label">RSSI (dBm)</div>'
         f'{sparkline([r.get("rssi") for r in window])}</div>'
         "</div>"
     )
 
     resets = [r for r in recent if r.get("reset")][-20:]
+    def reset_cell(r):
+        text = html.escape(str(r["reset"]))
+        bt = r.get("backtrace")
+        if bt:
+            text += (
+                '<br><span class="muted">backtrace (symbolize with '
+                "<code>uv run scripts/symbolize.py</code>): "
+                + " ".join(html.escape(a) for a in bt)
+                + "</span>"
+            )
+        return text
+
     reset_rows = "".join(
         f'<tr><td>{fmt_time(r["received_at"])}</td><td>#{r.get("boot", "")}</td>'
-        f'<td class="mono">{html.escape(str(r["reset"]))}</td></tr>'
+        f'<td class="mono">{reset_cell(r)}</td></tr>'
         for r in reversed(resets)
     )
     reset_table = (
@@ -205,13 +219,14 @@ def render_page():
             f"<td>{fmt_age(r.get('fetch_age_s'))}</td>"
             f"<td>{(r.get('prev_radio_on_ms') or 0) / 1000:.1f}</td>"
             f"<td>{(r.get('dhcp_ms') or 0) / 1000:.1f}</td>"
+            f"<td>{r.get('heap_cycle_start', '')}</td>"
             f"<td>{r.get('heap_free', '')}</td></tr>"
         )
     history = (
         "<h2>Recent reports</h2><div class=\"scroll\"><table>"
         "<tr><th>received</th><th>boot</th><th>uptime</th><th>batt</th><th>pack mV</th>"
         "<th>RSSI</th><th>fetch</th><th>data age</th><th>radio s</th><th>DHCP s</th>"
-        "<th>heap free</th></tr>" + "".join(rows) + "</table></div>"
+        "<th>heap idle</th><th>heap now</th></tr>" + "".join(rows) + "</table></div>"
     )
 
     head = (
