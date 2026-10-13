@@ -1,25 +1,38 @@
 use alloc::string::String;
 use embassy_time::{Duration, Timer};
-use esp_radio::wifi::{AuthMethod, WifiController};
+use esp_radio::wifi::{AuthMethod, WifiController, WifiError};
 use esp_wifi_sys::include::esp_wifi_set_max_tx_power;
 
 use crate::tasks::signals::STATUS;
 
-/// Starting TX power (quarter-dBm). Used for initial connect and reconnects.
-const TX_POWER_MAX: i8 = 60; // 15 dBm
+/// Starting TX power (quarter-dBm). Used for initial connect and after any failure.
+pub const TX_POWER_MAX: i8 = 60; // 15 dBm
 /// Minimum TX power the adaptive logic will probe down to (user-tested safe floor).
-const TX_POWER_MIN: i8 = 40; // 10.0 dBm
+pub const TX_POWER_MIN: i8 = 24; // 6.0 dBm
 /// Step size for each downward probe (quarter-dBm = 0.5 dBm per step).
-const TX_POWER_STEP: i8 = 2;
-/// Number of 5-second maintenance ticks to stay stable before stepping down.
-const STABLE_TICKS_PER_STEP: u32 = 36; // 36 × 5 s = 3 min per step
+pub const TX_POWER_STEP: i8 = 2;
+/// Consecutive successful connect+fetch cycles required before stepping TX power
+/// down one notch. A single successful association is a weaker signal than the
+/// old design's "stayed connected for 3 stable minutes", so require a streak
+/// rather than stepping on the very first success.
+pub const SUCCESSES_BEFORE_STEP: u32 = 3;
 
-#[embassy_executor::task]
-pub async fn wifi_connect_task(
-    mut controller: WifiController<'static>,
+/// Access-point details discovered during the one-time boot scan.
+pub struct ApInfo {
+    pub auth_method: Option<AuthMethod>,
+    pub channel: u8,
+    pub signal_strength: i8,
+}
+
+/// Puts the controller into station mode, scans for `ssid`, and configures the
+/// client with the scanned AP's channel/auth method. Call this once at boot —
+/// every later reconnect (via [`connect`]) reuses this configuration and skips
+/// re-scanning.
+pub async fn setup(
+    controller: &mut WifiController<'static>,
     ssid: &'static str,
     password: &'static str,
-) {
+) -> ApInfo {
     controller.set_mode(esp_radio::wifi::WifiMode::Sta).unwrap();
     controller.start().unwrap();
     crate::dprintln!("WiFi controller started!");
@@ -51,14 +64,17 @@ pub async fn wifi_connect_task(
             ap.channel
         );
         if ap.ssid == ssid {
-            target_ap = Some(ap);
+            target_ap = Some(ApInfo {
+                auth_method: ap.auth_method,
+                channel: ap.channel,
+                signal_strength: ap.signal_strength,
+            });
         }
     }
 
     let target_ap = target_ap.expect("Could not find target SSID in scan results");
     crate::dprintln!("");
     crate::dprintln!("Target AP details:");
-    crate::dprintln!("  SSID: {}", target_ap.ssid);
     crate::dprintln!("  RSSI: {} dBm", target_ap.signal_strength);
     crate::dprintln!("  Channel: {:?}", target_ap.channel);
     crate::dprintln!("  Auth Method: {:?}", target_ap.auth_method);
@@ -66,6 +82,9 @@ pub async fn wifi_connect_task(
 
     // Configure with scanned AP settings.
     // listen_interval=10: radio sleeps for 10 beacon intervals (~1 s) in MAX_MODEM power save.
+    // This only matters while `fetch_task` briefly re-enables modem sleep between
+    // connect and the first fetch on a cycle — the radio is fully stopped the rest
+    // of the time, see Power-Management.md.
     let client_config = esp_radio::wifi::ClientConfig::default()
         .with_ssid(String::from(ssid))
         .with_password(String::from(password))
@@ -81,42 +100,41 @@ pub async fn wifi_connect_task(
         .set_config(&esp_radio::wifi::ModeConfig::Client(client_config))
         .unwrap();
 
-    // Connect
-    crate::dprintln!("Initiating connection...");
-    match controller.connect() {
-        Ok(_) => crate::dprintln!("Connect command sent successfully"),
-        Err(e) => {
-            crate::dprintln!("Connect command failed: {:?}", e);
-            panic!("Failed to initiate connection");
-        }
-    }
+    target_ap
+}
 
-    // Wait for connection with timeout. Some boards need disconnect+connect retries.
+/// Connects (or reconnects) using the configuration already applied by [`setup`],
+/// applying `tx_power` before associating. Returns the connected RSSI on success.
+///
+/// NOTE: the ~500s bound below was inherited from the original one-shot boot
+/// connect; it's generous for a per-cycle reconnect (Stage 1 of the WiFi-teardown
+/// redesign) and may be worth shortening once tuned on hardware.
+pub async fn connect(
+    controller: &mut WifiController<'static>,
+    tx_power: i8,
+) -> Result<i8, WifiError> {
+    apply_tx_power(tx_power);
+
+    crate::dprintln!("Initiating connection...");
+    controller.connect()?;
+
     let mut attempts = 0;
     let max_attempts = 5000; // 500 seconds total
     let retry_interval = 50; // Retry connect every 5 seconds
-    let mut last_status = false;
 
     loop {
         let is_connected = controller.is_connected().unwrap_or(false);
 
-        if is_connected != last_status {
-            if is_connected {
-                crate::dprintln!("✓ Status changed: CONNECTED");
-            } else {
-                crate::dprintln!("✗ Status changed: DISCONNECTED");
-            }
-            last_status = is_connected;
-        }
-
         if is_connected {
+            let rssi = controller.rssi().unwrap_or(0) as i8;
             crate::dprintln!("✓ WiFi connected successfully!");
             {
                 let mut guard = STATUS.lock().await;
                 guard.wifi_connected = true;
-                guard.rssi = target_ap.signal_strength as i8;
+                guard.rssi = rssi;
+                guard.tx_power = tx_power;
             }
-            break;
+            return Ok(rssi);
         }
 
         attempts += 1;
@@ -125,94 +143,18 @@ pub async fn wifi_connect_task(
                 "✗ Failed to connect to WiFi after {} seconds",
                 max_attempts / 10
             );
-            crate::dprintln!("Possible reasons:");
-            crate::dprintln!("  - Wrong password");
-            crate::dprintln!("  - Weak signal (RSSI: {})", target_ap.signal_strength);
-            crate::dprintln!("  - AP authentication issues");
-            crate::dprintln!("  - Board-specific: try power cycle or re-flash");
-            panic!("WiFi connection timeout");
+            return Err(WifiError::Disconnected);
         }
 
         // Retry connect periodically — some boards get stuck and need disconnect+connect
-        if attempts > 0 && attempts % retry_interval == 0 {
-            crate::dprintln!(
-                "Retrying connect... ({}s elapsed) [RSSI: {}]",
-                attempts / 10,
-                target_ap.signal_strength
-            );
+        if attempts % retry_interval == 0 {
+            crate::dprintln!("Retrying connect... ({}s elapsed)", attempts / 10);
             let _ = controller.disconnect();
             Timer::after(Duration::from_millis(500)).await;
-            if controller.connect().is_ok() {
-                crate::dprintln!("Connect command re-sent");
-            }
+            let _ = controller.connect();
         }
 
         Timer::after(Duration::from_millis(100)).await;
-    }
-
-    // Power save is owned by fetch_task: WIFI_PS_NONE during the active HTTP fetch,
-    // WIFI_PS_MAX_MODEM during the 60-second idle gap between fetches.
-    // Do not enable it here — doing so races with DHCP and the first DNS lookup.
-
-    // Adaptive TX power state.
-    // Start at TX_POWER_MAX for safety, then probe downward in steps.
-    // On disconnect while stepping, lock at TX_POWER_MAX for the rest of the session
-    // (TX circuitry on some boards can't sustain lower power).
-    let mut tx_power: i8 = TX_POWER_MAX;
-    let mut tx_locked = false;
-    let mut stable_ticks: u32 = 0;
-
-    // Keep WiFi connection alive and manage adaptive TX power + live RSSI.
-    loop {
-        Timer::after(Duration::from_secs(5)).await;
-
-        let connected = controller.is_connected().unwrap_or(false);
-
-        if !connected {
-            crate::dprintln!("⚠ WiFi disconnected! Attempting reconnect...");
-
-            // If we were stepping down, lock TX at max — this board needs the headroom.
-            if tx_power < TX_POWER_MAX {
-                crate::dprintln!(
-                    "  TX power was {} ({:.1} dBm) at disconnect — locking at max",
-                    tx_power,
-                    tx_power as f32 / 4.0
-                );
-                tx_locked = true;
-            }
-            tx_power = TX_POWER_MAX;
-            stable_ticks = 0;
-            apply_tx_power(tx_power);
-            STATUS.lock().await.tx_power = tx_power;
-
-            let _ = controller.connect();
-            STATUS.lock().await.wifi_connected = false;
-            continue;
-        }
-
-        // Connected — update live RSSI.
-        let rssi = controller.rssi().unwrap_or(0) as i8;
-        {
-            let mut guard = STATUS.lock().await;
-            guard.wifi_connected = true;
-            guard.rssi = rssi;
-        }
-
-        // Step TX power down if not locked and not yet at floor.
-        if !tx_locked && tx_power > TX_POWER_MIN {
-            stable_ticks = stable_ticks.saturating_add(1);
-            if stable_ticks >= STABLE_TICKS_PER_STEP {
-                tx_power -= TX_POWER_STEP;
-                stable_ticks = 0;
-                apply_tx_power(tx_power);
-                STATUS.lock().await.tx_power = tx_power;
-                crate::dprintln!(
-                    "TX power stepped down to {} ({:.1} dBm)",
-                    tx_power,
-                    tx_power as f32 / 4.0
-                );
-            }
-        }
     }
 }
 

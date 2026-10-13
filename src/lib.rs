@@ -1,4 +1,6 @@
 #![no_std]
+// `waiti` in power.rs's idle hook; same feature esp-hal/esp-rtos enable.
+#![cfg_attr(feature = "light-sleep", feature(asm_experimental_arch))]
 
 extern crate alloc;
 
@@ -8,10 +10,12 @@ pub const GIT_VERSION: &str = env!("GIT_VERSION");
 pub mod grid;
 pub mod logger;
 pub mod network;
+pub mod power;
 pub mod provisioning;
 pub mod spi_devices;
 pub mod stations;
 pub mod tasks;
+pub mod watchdog;
 pub mod wifi;
 pub mod wifi_config;
 

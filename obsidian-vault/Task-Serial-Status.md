@@ -17,6 +17,8 @@ const CONNECTED_SLEEP_MS: u64 = 300;
 
 Every cycle it attempts a write with a 10ms timeout, then a flush with a 10ms timeout; `host_connected = flush_ok`. If either times out (typically because no host is actually reading the USB FIFO — e.g. the browser tab is closed), the *next* cycle sleeps 2s instead of 300ms. This avoids hammering the USB peripheral at 3.3Hz forever when nobody's listening, while still reconnecting quickly (within 2s) once a host does show up.
 
+Before any of that, each cycle checks the USB start-of-frame counter (`USB_DEVICE.FRAM_NUM.SOF_FRAME_INDEX`, advanced every 1ms by an enumerated host). If it hasn't moved since the last cycle there's no host at all, so the cycle skips the write and backs off to 2s. Added 2026-10-11 because the flush check alone kept passing with USB down during CPU light-sleep, making this task a 3.3Hz waker — see [[Power-Management]].
+
 ## Version frame
 
 A separate, distinct-magic-byte frame (`VERSION_MAGIC = 0xAC`) carrying `GIT_VERSION` (see [[Build-and-CI#Git version embedding]]) is sent once at startup and then every `VERSION_INTERVAL = 50` status frames (~10s at the connected rate) so a browser tab that connects *after* boot still eventually sees the firmware version.

@@ -118,13 +118,13 @@ async fn wait_with_breathing<T>(
     }
 }
 
-const EBIKE_COLOR: Color = Color { r: 0, g: 255, b: 0 }; // Green
-const MECHANICAL_BIKE_COLOR: Color = Color { r: 0, g: 0, b: 255 }; // Blue
+const EBIKE_COLOR: Color = Color { r: 0, g: 128, b: 0 }; // Green
+const MECHANICAL_BIKE_COLOR: Color = Color { r: 0, g: 0, b: 128 }; // Blue
 
 const MECHANICAL_BIKE_LEDS: [Led; 5] = [Led::Led10, Led::Led9, Led::Led8, Led::Led7, Led::Led0];
 
 const STATION_EMPTY_LEDS: [Led; 1] = [Led::Led6];
-const STATION_EMPTY_COLOR: Color = Color { r: 255, g: 0, b: 0 }; // Red
+const STATION_EMPTY_COLOR: Color = Color { r: 128, g: 0, b: 0 }; // Red
 
 pub const MAX_LEDS: usize = 12;
 

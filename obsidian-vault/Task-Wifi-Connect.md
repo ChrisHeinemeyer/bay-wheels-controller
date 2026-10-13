@@ -2,32 +2,58 @@
 tags: [task, wifi]
 ---
 
-# `wifi_connect_task` (`src/tasks/wifi_connect.rs`)
+# `wifi_connect.rs` (`src/tasks/wifi_connect.rs`)
 
-Owns the `WifiController` for the entire program lifetime. Two phases:
+**Rewritten (2026-08-04, `light-sleep-wifi-cycle` branch).** This is no longer a
+spawned task — there is no `wifi_connect_task` anymore. It's now a pair of plain
+async helper functions called by [[Task-Fetch]], which owns the `WifiController`
+for its entire lifetime and drives every connect/reconnect itself. See
+[[Power-Management]] for why: the radio is now fully torn down between fetch
+cycles rather than staying associated with modem-sleep, so there's no longer a
+"connection persists indefinitely" state for a separate task to babysit.
 
-## Phase 1 — connect (runs once)
+## `setup()` — runs once, at boot
 
-1. Set STA mode, start the controller, apply max TX power (`TX_POWER_MAX = 84` quarter-dBm = 21 dBm).
-2. Active-scan all channels (100ms min/max dwell) to find the target SSID's AP details (channel, auth method, RSSI).
-3. Build a `ClientConfig` from the *scanned* AP info (not hardcoded), with `listen_interval(10)` — the radio will sleep for 10 beacon intervals (~1s) whenever modem power-save is later enabled. Power save is deliberately **not** enabled here; ownership of power-save mode is handed to [[Task-Fetch]] (see the comment at `wifi_connect.rs:153` — enabling it before DHCP/first DNS lookup was found to race and cause failures).
-4. `controller.connect()`, then poll `is_connected()` every 100ms for up to 500s, re-issuing `disconnect()` + `connect()` every 5s if still not connected (some boards apparently get stuck and need this kick).
+Called once by `fetch_task` before its main loop, before the WiFi teardown/reconnect
+cycle starts:
+1. Set STA mode, start the controller, apply max TX power.
+2. Active-scan all channels (100ms min/max dwell) to find the target SSID's AP
+   details (channel, auth method, RSSI) — returned as an `ApInfo`.
+3. Build a `ClientConfig` from the scanned AP info, with `listen_interval(10)`, and
+   `set_config()` it onto the controller.
 
-## Phase 2 — maintenance loop (runs forever, every 5s)
+This scan/config only happens **once** — every later reconnect via `connect()`
+reuses it (assumes `set_config`'s state survives `stop_async()`/`start_async()`;
+flagged for hardware verification, see the plan this branch implements).
 
-- If disconnected: reconnect, and if TX power had been stepped down, **lock it at max** for the rest of the session (`tx_locked = true`) — the assumption baked in here is that a disconnect while at reduced power means this particular board's TX circuitry can't sustain lower power, so don't risk it again.
-- If connected: update live RSSI into `STATUS`, and if not locked and still above the floor, count stable ticks and step TX power down by 2 (quarter-dBm) every `STABLE_TICKS_PER_STEP = 36` ticks (~3 minutes) until `TX_POWER_MIN = 60` (15.0 dBm).
+## `connect()` — runs every cycle
 
-## Adaptive TX power state machine
+Takes the caller's remembered `tx_power` (see below), applies it, calls
+`controller.connect()`, then polls `is_connected()` every 100ms up to a ~500s bound
+(re-issuing `disconnect()`+`connect()` every 5s if stuck) — the same retry shape as
+the old one-shot boot connect, just returning `Result<i8, WifiError>` instead of
+panicking, since a failed reconnect is now a routine, retryable event rather than a
+fatal boot error.
 
-```
-TX_POWER_MAX (84, 21.0dBm) ──connect──▶ every 3 min stable ──▶ step -2 ──▶ ... ──▶ TX_POWER_MIN (60, 15.0dBm)
-        ▲                                                                              │
-        └──────────────────── disconnect (locks here if was stepping) ◀────────────────┘
-```
+## Adaptive TX power — now owned by `fetch_task`, re-based on successful cycles
 
-This is a real power optimization already in place — see [[Power-Management#Already implemented]]. The "lock at max after a disconnect mid-step" behavior means a board that experiences one bad RF moment (e.g. someone walks in front of it) will run at full TX power for the rest of that boot, even after signal recovers — it never re-attempts stepping down after locking. Worth knowing if you ever see a board stuck at high TX power for no obvious reason: check its `wifi_connected` history in the serial frame, not just current RSSI.
+The old "step down every 3 minutes of stable connection" clock doesn't exist
+anymore — each connection now only lives a few seconds. `fetch_task` carries
+`tx_power`/`success_streak` as loop-local state (no signal or static needed, since
+only `fetch_task` ever touches the controller) and calls `connect(controller,
+tx_power)` each cycle:
+- On a successful connect+fetch: step `tx_power` down by `TX_POWER_STEP` once
+  `SUCCESSES_BEFORE_STEP` consecutive successes accumulate (clamped at
+  `TX_POWER_MIN`).
+- On any failure: reset to `TX_POWER_MAX` and zero the streak — same "lock at max
+  after trouble" intent as the old `tx_locked` flag, just triggered per-cycle.
+
+`apply_tx_power()` (the raw `esp_wifi_set_max_tx_power` FFI wrapper) is unchanged.
 
 ## Relationship to `fetch_task`
 
-This task and [[Task-Fetch]] both touch the radio's power-save mode indirectly: this task never calls `esp_wifi_set_ps` at all; `fetch_task` toggles it around each HTTP request. See [[Power-Management]] for the full picture of how these interact.
+`fetch_task` now owns the `WifiController` value outright (moved into it from
+`main.rs` at spawn time) and drives the whole connect → fetch → teardown →
+sleep cycle itself, including `set_power_saving()` around the handshake window.
+See [[Task-Fetch]] for the full cycle and [[Power-Management]] for why full
+teardown replaced modem-sleep-and-stay-connected.

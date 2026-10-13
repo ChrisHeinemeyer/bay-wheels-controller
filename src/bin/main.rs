@@ -14,7 +14,7 @@ use alloc::string::String;
 #[cfg(not(feature = "debug-serial"))]
 use bay_wheels_controller::tasks::serial_status;
 use bay_wheels_controller::tasks::signals::{BoardId, STATUS};
-use bay_wheels_controller::tasks::{battery, fetch, input_read, station_leds, wifi_connect};
+use bay_wheels_controller::tasks::{battery, fetch, input_read, station_leds};
 use bay_wheels_controller::{GIT_VERSION, dprintln};
 use bay_wheels_controller::{network, provisioning, spi_devices, wifi_config};
 use embassy_executor::Spawner;
@@ -35,9 +35,28 @@ esp_bootloader_esp_idf::esp_app_desc!(
     u16::MAX
 );
 
+/// Logs the panic, saves it to RTC RAM for the next boot to report, and resets
+/// — instead of hanging until power-cycled. esp-hal routes unhandled exceptions
+/// and stack-guard hits here too.
+///
+/// Reading `info` at all (even just the location) keeps every panic site's
+/// formatting alive, and esp-hal's linker script puts the `Debug` lookup tables
+/// that pulls in (TrapFrame, ExceptionCause, GPIO signals, ...) in DRAM: ~6KB
+/// off the main stack. Affordable since the fetch task's TCP TX buffer shrank
+/// by 28KB (see fetch.rs).
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {}
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    let (file, line) = info
+        .location()
+        .map(|l| (l.file(), l.line()))
+        .unwrap_or(("?", 0));
+    dprintln!("PANIC at {}:{}: {}", file, line, info.message());
+    bay_wheels_controller::watchdog::record_and_reset(
+        bay_wheels_controller::watchdog::ResetCause::Panic,
+        file,
+        line,
+        format_args!("{}", info.message()),
+    )
 }
 
 /// Check if the provisioning button (GPIO2) is pressed
@@ -71,6 +90,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let peripherals = esp_hal::init(config);
+    bay_wheels_controller::watchdog::report_last_reset();
 
     // Setup heap allocator
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65536);
@@ -127,8 +147,28 @@ async fn main(spawner: Spawner) -> ! {
         }
     };
 
+    // SAFETY: the watchdog's `Rtc` only touches the RWDT registers; the
+    // light-sleep code below owns the real LPWR handle for the sleep/time
+    // registers, which don't overlap.
+    bay_wheels_controller::watchdog::init(esp_hal::rtc_cntl::Rtc::new(unsafe {
+        esp_hal::peripherals::LPWR::steal()
+    }));
+
     // Initialize Embassy executor
     let timg0 = TimerGroup::new(peripherals.TIMG1);
+    #[cfg(feature = "light-sleep")]
+    {
+        // GPIO2 was already consumed (and dropped) above for the boot-time
+        // provisioning-button check — stealing it here is sound for the same
+        // reason as the FLASH::steal() above: the original borrow is provably
+        // gone, no live aliasing. Reused as the light-sleep idle hook's
+        // physical wake-button escape hatch (see src/power.rs).
+        let wake_button = unsafe { esp_hal::peripherals::GPIO2::steal() };
+        let rtc = esp_hal::rtc_cntl::Rtc::new(peripherals.LPWR);
+        bay_wheels_controller::power::init(rtc, wake_button);
+        esp_rtos::start_with_idle_hook(timg0.timer0, bay_wheels_controller::power::idle_hook);
+    }
+    #[cfg(not(feature = "light-sleep"))]
     esp_rtos::start(timg0.timer0);
     dprintln!("Embassy initialized!");
 
@@ -141,10 +181,8 @@ async fn main(spawner: Spawner) -> ! {
     let ssid: &'static str = Box::leak(ssid.into_boxed_str());
     let password: &'static str = Box::leak(password.into_boxed_str());
 
-    // Spawn WiFi connection task
-    spawner
-        .spawn(wifi_connect::wifi_connect_task(controller, ssid, password))
-        .expect("Failed to spawn wifi_connect_task");
+    // `controller` is owned entirely by `fetch_task` now — it drives the whole
+    // connect/fetch/teardown cycle itself, see Power-Management.md.
 
     // Setup embassy-net stack for networking
     let (stack, runner) = network::create_network_stack(interfaces.sta, network::dhcp_config());
@@ -244,7 +282,7 @@ async fn main(spawner: Spawner) -> ! {
         .spawn(station_leds::station_leds_task(al5887))
         .expect("Failed to spawn station_leds_task");
     spawner
-        .spawn(fetch::fetch_task(stack))
+        .spawn(fetch::fetch_task(stack, controller, ssid, password))
         .expect("Failed to spawn fetch_task");
     spawner
         .spawn(input_read::input_read_task(shift_register, board_id))
@@ -257,9 +295,21 @@ async fn main(spawner: Spawner) -> ! {
         .expect("Failed to spawn serial_status_task");
     dprintln!("All tasks spawned!");
 
-    // Main loop - keep alive
+    // Main loop - keep alive, and feed the RTC watchdog unless the fetch loop
+    // or input task has stalled (see watchdog.rs).
+    let mut last_input_beat = 0;
     loop {
-        Timer::after(Duration::from_secs(60)).await;
+        Timer::after(Duration::from_secs(
+            bay_wheels_controller::watchdog::FEED_EVERY_SECS,
+        ))
+        .await;
+        let last_fetch_ok_us = STATUS
+            .lock()
+            .await
+            .last_fetch_at
+            .map(|t| t.as_micros())
+            .unwrap_or(0);
+        bay_wheels_controller::watchdog::check_and_feed(last_fetch_ok_us, &mut last_input_beat);
     }
 }
 

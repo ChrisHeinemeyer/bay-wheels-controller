@@ -15,9 +15,23 @@ pub async fn battery_task(
     crate::dprintln!("Battery task started!");
     loop {
         let adc_mv = nb::block!(adc1.read_oneshot(&mut pin)).unwrap_or(0);
-        crate::dprintln!("Battery ADC value: {} mV", adc_mv);
+        // Uptime lets a host compare firmware time against its own timestamps
+        // (light-sleep clock compensation check). Skipped while light-sleeping:
+        // nobody can read RTT then, and these lines would fill the 1 KB buffer
+        // and crowd out the sleep stats printed on wake.
+        if !crate::power::SLEEPING.load(core::sync::atomic::Ordering::Relaxed) {
+            crate::dprintln!(
+                "Battery ADC value: {} mV (uptime {}ms)",
+                adc_mv,
+                embassy_time::Instant::now().as_millis()
+            );
+        }
         let battery_pct = convert_to_percentage(adc_mv);
-        STATUS.lock().await.battery_pct = battery_pct;
+        {
+            let mut status = STATUS.lock().await;
+            status.battery_pct = battery_pct;
+            status.battery_adc_mv = adc_mv;
+        }
         Timer::after(Duration::from_secs(30)).await;
     }
 }

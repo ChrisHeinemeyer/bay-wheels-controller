@@ -5,6 +5,19 @@ debug-serial = []
 # Load SSID and PASSWORD from .env at build time (for development).
 # Copy .env.dist to .env and set your WiFi credentials.
 use-env = []
+# Light-sleep the CPU during scheduler idle gaps via a custom esp-rtos idle hook.
+# Off by default. WARNING: ESP32-S3 has no USB-Serial-JTAG wake source at the
+# hardware register level, so a light-sleep build is unresponsive to
+# probe-rs/espflash while asleep. Escape hatches: hold the provisioning button
+# (GPIO2) to force a wake window, or strap GPIO0 to GND at reset to force ROM
+# download mode (works regardless of firmware state). See src/power.rs.
+light-sleep = []
+# Diagnostic: count embassy task polls per task while light-sleeping, printed
+# with the light-sleep stats on wake, to find what keeps waking the CPU.
+sleep-trace = ["light-sleep", "embassy-executor/trace"]
+# POST a JSON status report (battery, RSSI, fetch age, reset cause, ...) to
+# LOG_SERVER from .env once per fetch cycle, while the radio is already up.
+log-server = []
 
 [package]
 edition      = "2024"
@@ -37,6 +50,7 @@ embassy-net = { version = "0.7.1", features = [
 ] }
 embedded-io = "0.6.1"
 embedded-io-async = "0.6.1"
+embedded-nal-async = "0.8.0"
 embassy-futures = "0.1.2"
 esp-alloc = "0.9.0"
 rtt-target = "0.6.2"

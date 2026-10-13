@@ -40,6 +40,8 @@ pub static FETCH_SIGNAL: Signal<CriticalSectionRawMutex, Instant> = Signal::new(
 pub struct SystemStatus {
     pub board_id: BoardId,
     pub battery_pct: u8,
+    /// Raw battery ADC reading (divider output), for telemetry.
+    pub battery_adc_mv: u16,
     pub wifi_connected: bool,
     pub rssi: i8,
     /// Current WiFi TX power in quarter-dBm units (same scale as esp_wifi_set_max_tx_power).
@@ -59,6 +61,7 @@ pub struct SystemStatus {
 pub static STATUS: Mutex<CriticalSectionRawMutex, SystemStatus> = Mutex::new(SystemStatus {
     board_id: BoardId::Board3,
     battery_pct: 100,
+    battery_adc_mv: 0,
     wifi_connected: false,
     rssi: 0,
     tx_power: 78,

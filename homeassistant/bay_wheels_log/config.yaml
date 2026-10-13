@@ -1,0 +1,17 @@
+name: Bay Wheels Log
+version: "1.0.1"
+slug: bay_wheels_log
+description: Receives and displays telemetry POSTed by the bay-wheels-controller firmware (log-server feature).
+arch:
+  - aarch64
+  - amd64
+  - armv7
+# The HA base images run s6-overlay v3 as PID 1 themselves.
+init: false
+startup: application
+boot: auto
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: Telemetry receiver (POST /report) and status page (GET /)
+webui: "http://[HOST]:[PORT:8099]/"

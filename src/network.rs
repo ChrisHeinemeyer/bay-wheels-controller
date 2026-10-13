@@ -24,5 +24,13 @@ pub fn create_network_stack(
 }
 
 pub fn dhcp_config() -> Config {
-    Config::dhcpv4(Default::default())
+    let mut dhcp = embassy_net::DhcpConfig::default();
+    // smoltcp waits 10s before re-sending an unanswered DISCOVER. The radio is
+    // torn down every fetch cycle, so embassy-net restarts DHCP on every
+    // reconnect, and the first DISCOVER goes out right as the link comes up and
+    // is reliably lost — every cycle's DHCP took ~9.9s, i.e. exactly one retry.
+    // Retrying after 1s costs a few tiny broadcasts and saves ~9s of radio-on
+    // time per cycle.
+    dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(1);
+    Config::dhcpv4(dhcp)
 }

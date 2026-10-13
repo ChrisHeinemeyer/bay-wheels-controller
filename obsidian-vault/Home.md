@@ -12,6 +12,7 @@ Open this folder as an Obsidian vault (`Open folder as vault`) to get backlinks 
 
 - [[Architecture]] — the big picture: hardware, boot sequence, task graph, how data flows from GBFS to an LED.
 - [[Power-Management]] — battery-life posture: what's already optimized (adaptive TX power, modem sleep, adaptive poll rate) and where the remaining budget is going.
+- [[Telemetry-and-Recovery]]: panic/watchdog self-reset with a saved reason, plus per-cycle telemetry to the Home Assistant log add-on.
 - [[Open-Questions]] — quirks and rough edges I noticed while reading, not necessarily bugs.
 
 ## By subsystem

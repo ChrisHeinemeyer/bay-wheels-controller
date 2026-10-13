@@ -107,6 +107,7 @@ dependencies = [
  "embassy-time",
  "embedded-io 0.6.1",
  "embedded-io-async 0.6.1",
+ "embedded-nal-async",
  "esp-alloc",
  "esp-bootloader-esp-idf",
  "esp-hal",

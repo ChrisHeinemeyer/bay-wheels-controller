@@ -9,6 +9,9 @@ fn main() {
     if std::env::var("CARGO_FEATURE_USE_ENV").is_ok() {
         load_env_file();
     }
+    if std::env::var("CARGO_FEATURE_LOG_SERVER").is_ok() {
+        load_log_server();
+    }
 }
 
 /// Embed git tag and commit (e.g. v1.0.1-abe59403-dirty) into the firmware.
@@ -25,44 +28,55 @@ fn embed_git_version() {
     println!("cargo:rerun-if-changed=.git/index");
 }
 
-fn load_env_file() {
+/// `KEY="value"` pairs from `.env`, for the features that read it.
+fn read_env_file(feature: &str) -> Vec<(String, String)> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let env_file = std::path::Path::new(&manifest_dir).join(".env");
 
     if !env_file.exists() {
         panic!(
-            "use-env feature enabled but .env not found. Copy .env.dist to .env and set SSID and PASSWORD."
+            "{feature} feature enabled but .env not found. Copy .env.dist to .env and fill it in."
         );
     }
+    println!("cargo:rerun-if-changed=.env");
 
     let contents = std::fs::read_to_string(&env_file)
-        .unwrap_or_else(|e| panic!("use-env: failed to read .env: {}", e));
+        .unwrap_or_else(|e| panic!("{feature}: failed to read .env: {}", e));
 
-    let mut ssid = None;
-    let mut password = None;
+    contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| {
+            (
+                key.trim().to_string(),
+                value.trim().trim_matches('"').to_string(),
+            )
+        })
+        .collect()
+}
 
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim();
-            let value = value.trim().trim_matches('"').to_string();
-            match key {
-                "SSID" => ssid = Some(value),
-                "PASSWORD" => password = Some(value),
-                _ => {}
-            }
-        }
-    }
+fn env_value(vars: &[(String, String)], key: &str) -> Option<String> {
+    vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+}
 
-    let ssid = ssid.expect("use-env: SSID not found in .env");
-    let password = password.expect("use-env: PASSWORD not found in .env");
+fn load_env_file() {
+    let vars = read_env_file("use-env");
+    let ssid = env_value(&vars, "SSID").expect("use-env: SSID not found in .env");
+    let password = env_value(&vars, "PASSWORD").expect("use-env: PASSWORD not found in .env");
 
     println!("cargo:rustc-env=SSID={}", ssid);
     println!("cargo:rustc-env=PASSWORD={}", password);
-    println!("cargo:rerun-if-changed=.env");
+}
+
+fn load_log_server() {
+    let vars = read_env_file("log-server");
+    let addr = env_value(&vars, "LOG_SERVER")
+        .expect("log-server: LOG_SERVER (e.g. \"10.0.0.107:8099\") not found in .env");
+    addr.parse::<std::net::SocketAddrV4>()
+        .unwrap_or_else(|e| panic!("log-server: LOG_SERVER {addr:?} is not ip:port: {e}"));
+    println!("cargo:rustc-env=LOG_SERVER={}", addr);
 }
 
 /// Parses `src/stations.rs` and emits `web/src/generated/station-ids.ts`.

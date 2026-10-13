@@ -5,4 +5,6 @@ pub mod serial_status;
 pub mod signals;
 pub mod station_leds;
 pub mod station_parser;
+#[cfg(feature = "log-server")]
+pub mod telemetry;
 pub mod wifi_connect;

@@ -1,5 +1,6 @@
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::Write;
+use esp_hal::peripherals::USB_DEVICE;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 
 use crate::GIT_VERSION;
@@ -46,6 +47,7 @@ pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Asyn
     let version_frame = build_version_frame();
     let mut frame_count: u32 = 0;
     let mut host_connected = true;
+    let mut last_sof = usb_sof_frame_index();
 
     loop {
         let sleep_ms = if host_connected {
@@ -54,6 +56,19 @@ pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Asyn
             DISCONNECTED_SLEEP_MS
         };
         Timer::after(Duration::from_millis(sleep_ms)).await;
+
+        // An enumerated USB host sends a start-of-frame every 1 ms, so a frame
+        // index that hasn't moved since last loop means no host at all —
+        // unplugged, or USB down because the CPU is light-sleeping. The flush
+        // check below can't tell: it was seen passing every 300 ms with USB
+        // down, keeping this task as the most frequent waker during sleep.
+        let sof = usb_sof_frame_index();
+        let sof_advanced = sof != last_sof;
+        last_sof = sof;
+        if !sof_advanced {
+            host_connected = false;
+            continue;
+        }
 
         // Advertise version at startup and periodically for late-connecting clients.
         if frame_count % VERSION_INTERVAL == 0 {
@@ -79,6 +94,14 @@ pub async fn serial_status_task(mut serial: UsbSerialJtag<'static, esp_hal::Asyn
                 .is_ok();
         host_connected = flush_ok;
     }
+}
+
+fn usb_sof_frame_index() -> u16 {
+    USB_DEVICE::regs()
+        .fram_num()
+        .read()
+        .sof_frame_index()
+        .bits()
 }
 
 fn build_frame(s: &SystemStatus) -> [u8; FRAME_SIZE] {

@@ -21,6 +21,10 @@ pub async fn input_read_task(
     let mut last_touch: Option<Instant> = None;
 
     loop {
+        // Liveness for `watchdog::check_and_feed`; this task is the only writer.
+        let beat = crate::watchdog::INPUT_HEARTBEAT.load(core::sync::atomic::Ordering::Relaxed);
+        crate::watchdog::INPUT_HEARTBEAT
+            .store(beat.wrapping_add(1), core::sync::atomic::Ordering::Relaxed);
         let value = shift_register.read().await;
         match value {
             Ok((row, col)) => {
