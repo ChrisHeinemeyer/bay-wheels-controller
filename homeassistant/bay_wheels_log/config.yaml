@@ -1,5 +1,5 @@
 name: Bay Wheels Log
-version: "1.0.1"
+version: "1.0.2"
 slug: bay_wheels_log
 description: Receives and displays telemetry POSTed by the bay-wheels-controller firmware (log-server feature).
 arch:
@@ -15,3 +15,6 @@ ports:
 ports_description:
   8099/tcp: Telemetry receiver (POST /report) and status page (GET /)
 webui: "http://[HOST]:[PORT:8099]/"
+# Supervisor restarts the add-on if this stops answering (when the add-on's
+# Watchdog toggle is on).
+watchdog: "http://[HOST]:[PORT:8099]/healthz"
