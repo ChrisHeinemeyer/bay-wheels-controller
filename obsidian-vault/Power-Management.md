@@ -6,7 +6,7 @@ tags: [power]
 
 This is a 3× AA battery product ([[Task-Battery]]), so every task's polling cadence and every radio state transition is effectively a battery-life decision. Recent git history (`b128491`, `3733354`, `95bdb66`, `572d248`, `3a52045`) shows active, ongoing tuning in this area.
 
-## In progress: WiFi full teardown + CPU light-sleep (`light-sleep-wifi-cycle` branch)
+## WiFi full teardown + CPU light-sleep (shipped in v1.3.0; default since v1.3.1)
 
 Started 2026-08-04 after a Nordic PPK2 measurement showed a ~55mA sustained idle
 floor (not spikes) — everything below in "Already implemented" only shaves the
@@ -132,14 +132,89 @@ trace hooks counting per-task polls; diagnostic only):
 **DHCP 10s → 1s (2026-10-12).** Every cycle's DHCP took ~9.9s: embassy-net
 resets DHCP on each link-up (the radio is torn down every cycle), the first
 DISCOVER is reliably lost, and smoltcp's default `discover_timeout` is 10s.
-`network.rs` now sets it to 1s; verified on hardware (`dhcp_ms` ≈ 1.0s). Still
-exactly one retry, so the first DISCOVER is still lost (maybe modem PS still on
-at link-up). Reusing the lease would need the DHCP ACK, which embassy-net
+`network.rs` now sets it to 1s. The first hardware run showed `dhcp_ms` ≈ 1.0s,
+but 35h of v1.3.1 telemetry show a median of **2.0s** (p95 3.0s): usually the
+first DISCOVER *and* the 1s retry are lost (maybe modem PS still on at
+link-up). Reusing the lease would need the DHCP ACK, which embassy-net
 discards (lease time is private in smoltcp).
 
-Next options: fully deinit esp-radio between fetches (biggest win, costly
-reconnects/risk), lower `MIN_NAP_US` toward ~2ms, and — first — the PPK2
-measurement (55mA baseline vs Stage 1 vs Stage 2b) to size all of it.
+## Measured budget (v1.3.1, 2026-10-15)
+
+PPK2 in source mode, batteries removed (an earlier ~265mA "floor" was the
+PPK2 back-feeding the AA cells left in the holder):
+
+| State | Current |
+|---|---|
+| Original modem-sleep design, idle (2026-08-04) | ~55mA |
+| ESP32 held in reset (rest of the board) | ~1.8mA |
+| Light-sleep build, idle | ~14mA |
+| Same, held awake (GPIO2 window) | ~40mA |
+| Radio window | ~130mA, TX spikes to ~500mA |
+
+35h of v1.3.1 telemetry: 127s cycle, radio on 6.3s per cycle (fetch 4.2s, DHCP
+2.0s, connect 0.1s), TX power settled at 6dBm. Time split: asleep 83.4%,
+awake with radio off 11.6%, radio on 5.0%. Sleep current worked back from
+"14mA idle at 89% asleep, 40mA awake" is ~10.8mA including the board.
+
+| Part | Share × current | Average |
+|---|---|---|
+| Asleep | 83.4% × ~10.8mA | **~9.0mA** |
+| Radio on | 5.0% × ~130mA | ~6.5mA |
+| Awake, radio off | 11.6% × ~40mA | ~4.6mA |
+| **Total** | | **~20mA** |
+
+Cross-check from the battery voltage: 1.31 → 1.27V/cell over 35h, on a typical
+alkaline curve ≈ 385mAh, gives only ~10-11mA. The cells' history is messy
+(back-fed by the PPK2), so the truth is likely between the two. A 2-minute PPK2
+average at 4.5V on v1.3.1 settles it.
+
+Fresh 3×AA alkaline, assuming the board stops at ~1.1V/cell (~2,100mAh usable;
+unknown regulator, TX spikes may brown out earlier): **~4.4 days at 20mA,
+~8.8 days at 10mA.** The current set (1.27V/cell on 2026-10-15) gives a field
+test: dead around 2026-10-17 means ~20mA; still going 10-19/20 means ~10mA.
+Brownout resets will show on the log server's Resets table.
+
+## Next: reduce sleep current (biggest lever)
+
+Sleep is ~9mA of the ~20mA. An S3 in a well-configured light sleep needs well
+under 1mA plus flash, so ~9-10mA means a lot is still powered.
+`power.rs` calls `rtc.sleep_light()`, which uses the **default
+`RtcSleepConfig`**. It leaves on:
+
+- the **WiFi / baseband power domain** (`wifi_pd_en` = false). The radio is
+  stopped during every nap, so it could be powered down.
+- the **internal 8MHz RC oscillator** (`int_8m_pd_en` = false).
+- the **digital core at full voltage** (`dig_dbias_slp` = 1.10V; ESP-IDF drops
+  it during light sleep).
+- possibly more (`lslp_mem_inf_fpu`, `rtc_peri_pd_en` — the latter must stay on
+  for the GPIO2 ext0 wake).
+
+Experiment: build a custom `RtcSleepConfig` in `power.rs`, call
+`rtc.sleep(&config, &[&timer, &wake_button])`, and turn things off one at a
+time with the PPK2 attached. Risks to test on each step:
+
+- **WiFi power-down:** esp-radio may not reconnect after the WiFi domain loses
+  state while stopped. Make sure that the next fetch cycle still connects
+  (telemetry `fetch_ok`).
+- **Lower `dig_dbias`:** too low can crash on wake. ESP-IDF's light-sleep
+  values for the S3 are the reference.
+- **Clock changes** can shift the RC_SLOW calibration; watch `rc_scale_ppm`.
+
+Target: sleep ~2-3mA (board 1.8mA + chip). That would take the average from
+~20mA to ~13mA, about **a week** on a fresh set even at the pessimistic end.
+
+## Other options (smaller)
+
+- **Wake less often while asleep:** the WiFi blob's leftover timers (~16/s) keep
+  the CPU awake 11.6% of the time (~4.6mA). Fully deinitializing esp-radio
+  between fetches would remove them, but makes every reconnect slower and is
+  risky. Lowering `MIN_NAP_US` toward ~2ms would turn some short awake gaps into
+  naps.
+- **Shorter radio window (~6.5mA):** fix the lost first DHCP DISCOVER (2s →
+  ~0.1s), or reuse the DHCP lease (needs the ACK, which embassy-net discards).
+  The 4.2s fetch is mostly TLS + download of ~275KB and is harder to cut.
+- **Fetch less often:** the 120s interval is the simplest lever of all (radio
+  share scales directly), if fresher-than-2-minutes data isn't needed.
 
 **Practical notes.** Logs written while asleep stay in the 1KB RTT buffer
 until a GPIO2 press lets probe-rs attach; whole lines that don't fit are
@@ -163,12 +238,12 @@ an 8KB buffer — **under 7KB of stack headroom at ~114KB**. (Resolved 2026-10-1
 - **Modem allowed to sleep (`WIFI_PS_MAX_MODEM`) for the entire life of a reused connection, not just the idle gap** (superseded on the `light-sleep-wifi-cycle` branch — see "In progress" above; kept as the historical record). **Verified on real hardware (2026-07-04, physical board over USB, `cargo run --release --features use-env`)**: 3 consecutive successful fetch cycles (200 status, full ~271 KB body streamed and parsed, 608 stations matched each time) with the modem never forced awake outside the initial connect — no dropped requests, no reconnects triggered. See [[Task-Fetch]].
 - **AL5887 chip-disable during idle.** [[Task-Station-LEDs]] now calls `al5887.set_chip_enable(false)` when the selected station goes to `StationIdx::None`, instead of just zeroing all 12 LEDs' brightness/color registers — this cuts the driver chip's own quiescent draw during no-touch idle, not just LED current, and as a side effect trades ~48 SPI register writes per idle transition for 1. Re-enabled (`set_chip_enable(true)`) only when coming back out of idle into a real station selection. See [[Hardware-Drivers#AL5887 LED driver]].
 
-## Not yet done — biggest remaining opportunities
+## Older opportunity list (pre-light-sleep; see "Next" above for current priorities)
 
 Roughly in order of likely impact, given what's implemented above:
 
 1. ~~**Full-network GBFS download every 60s — conditional GET.**~~ **Tested directly against the live endpoint (curl, 2026-07-04) and ruled out at the current poll rate — for two independent reasons.** First, the premise was wrong: `TARGET_STATIONS` turns out to have 611 entries (essentially the whole network, see [[Data-Model#TARGET_STATIONS]]), not the ~120 an earlier version of this vault mistakenly claimed — so there's no meaningful "extract a small fraction" saving available even in principle. Second, and independent of that: the feed supports `If-None-Match`/`If-Modified-Since` correctly (confirmed: matching ETag → `304`, 0-byte body vs. 271 KB for `200`), but it declares `"ttl": 60` and regenerates on a fixed 60-second schedule with a fresh per-station `last_reported` timestamp every time — confirmed `Last-Modified` and `ETag` both changed between two checks 60s apart. Since this firmware polls every 60s, matching the feed's own regeneration interval, a conditional GET would almost never actually return a `304` in practice. Not worth the added complexity.
-2. **No CPU light-sleep.** **Now being actively pursued — see "In progress" at the top of this note** (`light-sleep-wifi-cycle` branch; working as of Stage 2b, 2026-10-11). Confirmed by grep: nothing in this codebase calls into `esp-hal`'s RTC sleep primitives (`esp_hal::rtc_cntl::sleep`, which does exist and support the S3). All the sleep here is WiFi-modem-level, not CPU-level — the CPU only idles via the Embassy executor's normal WFI between task wakeups, never enters a deeper sleep state that clock-gates more of the chip.
+2. ~~**No CPU light-sleep.**~~ **Done:** shipped in v1.3.0, default since v1.3.1. See the top of this note.
    - **Attempted and reverted (2026-07-26).** A custom `esp_rtos` idle hook (`src/power.rs`, `light-sleep` feature) dropped the CPU into `rtc.sleep_light()` in fixed 20ms chunks whenever idle. On real hardware this made the board unresponsive to probe-rs/espflash over the native USB-Serial-JTAG interface — recovered only by manually strapping GPIO0 low at reset to force ROM download mode. Root cause, confirmed at the hardware-register level (not just the missing wake source): ESP32-S3 has no USB wake bit in its `WakeTriggers` register at all — no software fix was possible as originally attempted. Stage 2's design works around this by registering the provisioning button (GPIO2, RTC-capable) as a physical `Ext0WakeupSource` escape hatch instead, with GPIO0-strap recovery as the backstop.
 3. **Fixed LED brightness (30/255) regardless of how many LEDs are lit.** No global dimming based on total lit-LED count, even though `LedGlobalDimming` register exists unused ([[Hardware-Drivers#AL5887 LED driver]]).
 
