@@ -174,6 +174,15 @@ unknown regulator, TX spikes may brown out earlier): **~4.4 days at 20mA,
 test: dead around 2026-10-17 means ~20mA; still going 10-19/20 means ~10mA.
 Brownout resets will show on the log server's Resets table.
 
+**Result (2026-10-17):** the last report arrived at 2026-10-17 04:08, with
+no brownout resets before it. The resting pack voltage was 3.33V
+(1.11V/cell), so the board cutoff is ~1.11V/cell, as assumed above. This
+matches the ~20mA case. The v1.3.1 run (1.318 → 1.109V/cell in 88.6h) set
+the battery curve in [[Task-Battery#Calibration (2026-10-17)]]. If
+1.318V/cell is ~55% of the usable charge (an estimate), a fresh set lasts
+~6.7 days. That is ~13mA at 2,100mAh. Only a PPK2 average or a run from
+fresh cells can settle the current.
+
 ## Next: reduce sleep current (biggest lever)
 
 Sleep is ~9mA of the ~20mA. An S3 in a well-configured light sleep needs well

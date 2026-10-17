@@ -36,29 +36,34 @@ pub async fn battery_task(
     }
 }
 
-/// (pack mV, percent) breakpoints approximating a 3× AA alkaline discharge curve, highest
-/// voltage first. Alkaline cells hold voltage relatively flat for most of their capacity and
-/// then fall off a cliff near depletion — a plain linear map (the old approach) overstates
-/// capacity through the flat region and understates how little is left once voltage starts
-/// sliding. Derived from a commonly-cited single-cell alkaline curve (1.50V/1.40V/1.30V/1.20V/
-/// 1.10V/1.00V/0.90V at 100/83/62/42/23/8/0%), scaled ×3 for the series pack and interpolated
-/// to finer steps.
-const DISCHARGE_CURVE_MV: [(u16, u8); 15] = [
+/// (pack mV, percent) breakpoints for a 3× AA alkaline pack on this board, highest voltage
+/// first. Alkaline cells hold voltage relatively flat for most of their capacity and then fall
+/// off a cliff near depletion, so a straight-line map overstates what is left.
+///
+/// The bottom half (3955 mV and below) is measured: Board3 on v1.3.1 ran from 3955 mV to its
+/// last report at 3330 mV (1.11V/cell) over 88.6h at a constant duty cycle, so elapsed time
+/// tracks charge drawn (log server, 2026-10-13 to 2026-10-17). Voltages are resting values;
+/// samples taken during a radio TX burst read ~130 mV lower. 0% is where the board stopped
+/// reporting, not where the cells are chemically empty. The top half keeps the shape of a
+/// commonly-cited single-cell alkaline curve (×3 for the series pack), rescaled to 55-100%.
+/// The 55% split is an estimate: no fresh-cell data yet.
+const DISCHARGE_CURVE_MV: [(u16, u8); 16] = [
     (4500, 100),
-    (4410, 95),
-    (4320, 90),
-    (4240, 85),
-    (4160, 80),
-    (4010, 70),
-    (3870, 60),
-    (3720, 50),
-    (3570, 40),
-    (3410, 30),
-    (3240, 20),
-    (3040, 10),
-    (2890, 5),
-    (2780, 2),
-    (2700, 0),
+    (4410, 93),
+    (4320, 87),
+    (4240, 80),
+    (4160, 74),
+    (4010, 60),
+    (3955, 55),
+    (3925, 50),
+    (3885, 44),
+    (3820, 33),
+    (3760, 28),
+    (3660, 17),
+    (3565, 11),
+    (3490, 6),
+    (3405, 3),
+    (3330, 0),
 ];
 
 fn convert_to_percentage(adc_mv: u16) -> u8 {
