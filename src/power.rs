@@ -30,6 +30,30 @@
 
 use core::sync::atomic::AtomicBool;
 
+/// Which parts of the chip light sleep powers down, from the `SLEEP_CFG` build
+/// env var (default 0). Each level adds to the one before:
+/// - 0: esp-hal's default `RtcSleepConfig`.
+/// - 1: internal 8 MHz oscillator off.
+/// - 2: ESP-IDF's light-sleep regulator settings with XTAL and 8M off (digital
+///   rail dropped in sleep, bias and current-monitor powered down).
+/// - 3: WiFi/modem power domain off. The radio is stopped during every nap.
+pub const SLEEP_CFG: u32 = parse_u32(option_env!("SLEEP_CFG"), 0);
+
+/// `option_env!` value as a number, or `default` if unset. Fails the build on
+/// anything but ASCII digits.
+pub const fn parse_u32(s: Option<&str>, default: u32) -> u32 {
+    let Some(s) = s else { return default };
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut n = 0;
+    while i < b.len() {
+        assert!(b[i].is_ascii_digit(), "expected a number");
+        n = n * 10 + (b[i] - b'0') as u32;
+        i += 1;
+    }
+    n
+}
+
 /// Set while the WiFi radio is started. The idle hook never light-sleeps while
 /// this is set. Starts `true` because the radio comes up during boot (scan in
 /// `wifi_connect::setup`) before the fetch loop takes over the flag.
@@ -75,7 +99,9 @@ mod inner {
     use esp_hal::gpio::RtcPinWithResistors;
     use esp_hal::peripherals::{GPIO2, LPWR, RTC_IO, SYSTIMER, TIMG1};
     use esp_hal::rtc_cntl::Rtc;
-    use esp_hal::rtc_cntl::sleep::{Ext0WakeupSource, TimerWakeupSource, WakeupLevel};
+    use esp_hal::rtc_cntl::sleep::{
+        Ext0WakeupSource, RtcSleepConfig, TimerWakeupSource, WakeupLevel,
+    };
     use esp_hal::time::Instant;
 
     use super::RADIO_ACTIVE;
@@ -112,6 +138,7 @@ mod inner {
 
     struct State {
         rtc: Rtc<'static>,
+        sleep_cfg: RtcSleepConfig,
         wake_button: Ext0WakeupSource<GPIO2<'static>>,
         /// No sleep until `Instant::now()` passes this (boot grace / button window).
         awake_until_us: u64,
@@ -187,6 +214,7 @@ mod inner {
             unsafe {
                 *STATE.0.get() = Some(State {
                     rtc,
+                    sleep_cfg: sleep_config(),
                     wake_button,
                     awake_until_us: BOOT_GRACE.as_micros() as u64,
                     sleeping: false,
@@ -199,6 +227,30 @@ mod inner {
                 })
             };
         });
+    }
+
+    /// The `RtcSleepConfig` for `super::SLEEP_CFG`. Level 2 values are ESP-IDF's
+    /// `rtc_sleep_get_default_config` light-sleep branch with XTAL and 8M
+    /// powered down (esp32s3 `rtc.h`: `RTC_CNTL_DBIAS_SLP` = 5,
+    /// `RTC_CNTL_DBG_ATTEN_LIGHTSLEEP_DEFAULT` = 5, bias/pd_cur DEFAULT = 1).
+    fn sleep_config() -> RtcSleepConfig {
+        let mut cfg = RtcSleepConfig::default();
+        if super::SLEEP_CFG >= 1 {
+            cfg.set_int_8m_pd_en(true);
+        }
+        if super::SLEEP_CFG >= 2 {
+            cfg.set_rtc_regulator_fpu(true);
+            cfg.set_dbg_atten_slp(5);
+            cfg.set_dig_dbias_slp(5);
+            cfg.set_bias_sleep_slp(true);
+            cfg.set_pd_cur_slp(true);
+            cfg.set_bias_sleep_monitor(true);
+            cfg.set_pd_cur_monitor(true);
+        }
+        if super::SLEEP_CFG >= 3 {
+            cfg.set_modem_pd_en(true);
+        }
+        cfg
     }
 
     fn now_us() -> u64 {
@@ -399,7 +451,8 @@ mod inner {
         let timer = TimerWakeupSource::new(Duration::from_micros(nominal_us));
         // The wake alarm is set relative to an RTC read inside `sleep_light`.
         latch_rtc_time();
-        state.rtc.sleep_light(&[&timer, &state.wake_button]);
+        let cfg = state.sleep_cfg;
+        state.rtc.sleep(&cfg, &[&timer, &state.wake_button]);
 
         let cause = LPWR::regs().slp_wakeup_cause().read().wakeup_cause().bits();
         latch_rtc_time();

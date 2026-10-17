@@ -160,7 +160,8 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
          \"slept_ms_total\":{},\"naps_total\":{},\"near_deadline_waits_total\":{},\
          \"spurious_ext0_total\":{},\"rc_scale_ppm\":{},\"heap_free\":{},\
          \"heap_prev_after_teardown\":{},\"heap_cycle_start\":{},\"heap_after_start\":{},\
-         \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{}",
+         \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{},\
+         \"sleep_cfg\":{}",
         cycle.connect_ms,
         cycle.dhcp_ms,
         cycle.fetch_ms,
@@ -177,6 +178,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         cycle.heap.after_connect,
         cycle.heap.after_dhcp,
         cycle.heap.after_fetch,
+        crate::power::SLEEP_CFG,
     );
 
     let mut summary = heapless::String::<256>::new();

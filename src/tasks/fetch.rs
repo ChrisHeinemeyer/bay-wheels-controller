@@ -38,7 +38,9 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(90);
 const RETRY_GAP: Duration = Duration::from_secs(60);
 /// Gap after a successful fetch before the next cycle — the radio is stopped for
 /// all of it, so this is where CPU light sleep (src/power.rs) takes effect.
-const SUCCESS_GAP: Duration = Duration::from_secs(120);
+/// `FETCH_GAP_S` at build time overrides it (shorter cycles while testing).
+const SUCCESS_GAP: Duration =
+    Duration::from_secs(crate::power::parse_u32(option_env!("FETCH_GAP_S"), 120) as u64);
 
 /// Outcome of one fetch attempt over a freshly-opened connection.
 enum FetchOutcome {
