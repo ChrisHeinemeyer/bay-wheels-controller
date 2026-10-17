@@ -13,7 +13,18 @@ pub async fn battery_task(
     >,
 ) {
     crate::dprintln!("Battery task started!");
+    let mut first = true;
     loop {
+        // TX bursts sag the pack ~130 mV, which reads as ~10 points low on the
+        // discharge curve. Wait for the radio to stop so every sample is a
+        // resting voltage. No cost: the CPU can't light-sleep while it's on.
+        // The first reading skips the wait: RADIO_ACTIVE starts `true`, but this
+        // task is spawned before fetch_task brings the radio up, and waiting
+        // would leave 0 mV in the first telemetry report after a reset.
+        while !first && crate::power::RADIO_ACTIVE.load(core::sync::atomic::Ordering::Acquire) {
+            Timer::after(Duration::from_secs(1)).await;
+        }
+        first = false;
         let adc_mv = nb::block!(adc1.read_oneshot(&mut pin)).unwrap_or(0);
         // Uptime lets a host compare firmware time against its own timestamps
         // (light-sleep clock compensation check). Skipped while light-sleeping:

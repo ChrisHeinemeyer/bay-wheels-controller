@@ -4,11 +4,15 @@ tags: [task, power]
 
 # `battery_task` (`src/tasks/battery.rs`)
 
-Simplest task in the codebase. Every 5 seconds:
+Simplest task in the codebase. Every 30 seconds:
 
-1. Blocking one-shot ADC read (`nb::block!(adc1.read_oneshot(&mut pin))`) on GPIO5, attenuation `_2p5dB`.
-2. Converts millivolts → percentage in `convert_to_percentage`.
-3. Writes `STATUS.battery_pct`.
+1. Waits until `power::RADIO_ACTIVE` is clear (polls once a second). TX bursts sag the pack
+   ~130 mV, which reads ~10 points low on the curve, so samples are only taken with the radio
+   stopped. The first reading after boot skips the wait: the flag starts `true`, but the
+   radio is not up yet (`fetch_task` is spawned after this task).
+2. Blocking one-shot ADC read (`nb::block!(adc1.read_oneshot(&mut pin))`) on GPIO5, attenuation `_2p5dB`.
+3. Converts millivolts → percentage in `convert_to_percentage`.
+4. Writes `STATUS.battery_pct`.
 
 ## Voltage math
 

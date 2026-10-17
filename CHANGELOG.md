@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Battery percentage uses a discharge curve measured on the board. 0% is now 3.33V for the
   pack (1.11V/cell), where the board stops working. Before, 0% was 2.70V, and the board
   showed 25% when it stopped.
+- The battery is not read while the radio is on. Readings during a WiFi transmission were
+  about 10 points too low.
 
 ## [1.3.1] - 2026-10-13
 
