@@ -52,12 +52,34 @@ pub fn sleep_level() -> u32 {
     if SLEEP_SWEEP_S == 0 {
         return SLEEP_CFG;
     }
+    sweep_step(SLEEP_SWEEP_S, SLEEP_CFG_MAX + 1)
+}
+
+/// Shortest idle gap the hook will light-sleep through (shorter ones `waiti`).
+/// `MIN_NAP_US` at build time overrides the default; it must stay above the
+/// idle hook's 2 ms wake margin.
+const MIN_NAP_US: u32 = parse_u32(option_env!("MIN_NAP_US"), 5_000);
+
+/// Measurement aid like `SLEEP_SWEEP_S`: with `NAP_SWEEP_S` set, the minimum
+/// nap steps through `NAP_SWEEP_US` every that many seconds of uptime.
+const NAP_SWEEP_S: u32 = parse_u32(option_env!("NAP_SWEEP_S"), 0);
+const NAP_SWEEP_US: [u32; 4] = [5_000, 4_000, 3_000, 2_500];
+
+/// The minimum nap in effect now, in µs.
+pub fn min_nap_us() -> u32 {
+    if NAP_SWEEP_S == 0 {
+        return MIN_NAP_US;
+    }
+    NAP_SWEEP_US[sweep_step(NAP_SWEEP_S, NAP_SWEEP_US.len() as u32) as usize]
+}
+
+/// `(uptime / period_s) % steps`.
+fn sweep_step(period_s: u32, steps: u32) -> u32 {
     // esp-hal's clock, not embassy's: this runs in the idle hook.
     let uptime_s = esp_hal::time::Instant::now()
         .duration_since_epoch()
         .as_secs();
-    let step = uptime_s / SLEEP_SWEEP_S as u64;
-    (step % (SLEEP_CFG_MAX as u64 + 1)) as u32
+    ((uptime_s / period_s as u64) % steps as u64) as u32
 }
 
 /// `option_env!` value as a number, or `default` if unset. Fails the build on
@@ -130,8 +152,7 @@ mod inner {
     /// Longest single nap, used when no task deadline is armed.
     const MAX_NAP_US: u64 = 1_000_000;
     /// Don't sleep if the next deadline is closer than this — `waiti` instead.
-    /// `MIN_NAP_US` at build time overrides it.
-    const MIN_NAP_US: u64 = super::parse_u32(option_env!("MIN_NAP_US"), 5_000) as u64;
+    // Minimum nap: see `super::min_nap_us()`.
     /// End each nap this long before the deadline, to absorb wake-up latency.
     const WAKE_MARGIN_US: u64 = 2_000;
     /// After an overslept nap, leave TIMG1 this far short of its alarm so the
@@ -451,7 +472,7 @@ mod inner {
             MAX_NAP_US
         };
         let budget = until_alarm_us.min(MAX_NAP_US);
-        (budget >= MIN_NAP_US).then(|| budget - WAKE_MARGIN_US)
+        (budget >= super::min_nap_us() as u64).then(|| budget - WAKE_MARGIN_US)
     }
 
     /// One light-sleep nap of up to `nap_us`, then advance SYSTIMER and TIMG1 by

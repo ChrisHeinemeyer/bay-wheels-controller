@@ -259,11 +259,10 @@ async fn teardown(controller: &mut WifiController<'static>) {
 /// Measurement aid: `TX_POWER_FIXED` (quarter-dBm) at build time pins TX power
 /// and turns the adaptive stepping off, so builds compared on the PPK2 transmit
 /// the same. Unset or 0 = adaptive.
-const TX_POWER_FIXED: Option<i8> =
-    match crate::power::parse_u32(option_env!("TX_POWER_FIXED"), 0) {
-        0 => None,
-        q => Some(q as i8),
-    };
+const TX_POWER_FIXED: Option<i8> = match crate::power::parse_u32(option_env!("TX_POWER_FIXED"), 0) {
+    0 => None,
+    q => Some(q as i8),
+};
 
 fn reset_tx_power(tx_power: &mut i8, success_streak: &mut u32) {
     *tx_power = TX_POWER_FIXED.unwrap_or(wifi_connect::TX_POWER_MAX);

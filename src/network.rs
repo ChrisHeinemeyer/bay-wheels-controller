@@ -30,7 +30,8 @@ pub fn dhcp_config() -> Config {
     // reconnect, and the first DISCOVER goes out right as the link comes up and
     // is reliably lost — every cycle's DHCP took ~9.9s, i.e. exactly one retry.
     // Retrying after 1s costs a few tiny broadcasts and saves ~9s of radio-on
-    // time per cycle.
-    dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(1);
+    // time per cycle. `DHCP_DISCOVER_MS` at build time overrides the 1s.
+    let discover_ms = crate::power::parse_u32(option_env!("DHCP_DISCOVER_MS"), 1000);
+    dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_millis(discover_ms as u64);
     Config::dhcpv4(dhcp)
 }
