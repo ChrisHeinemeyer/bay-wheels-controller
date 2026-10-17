@@ -178,7 +178,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         cycle.heap.after_connect,
         cycle.heap.after_dhcp,
         cycle.heap.after_fetch,
-        crate::power::SLEEP_CFG,
+        crate::power::sleep_level(),
     );
 
     let mut summary = heapless::String::<256>::new();

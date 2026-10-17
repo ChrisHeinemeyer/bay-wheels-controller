@@ -87,7 +87,7 @@ pub async fn fetch_task(
     // Adaptive TX power, now re-based on successful connect+fetch cycles instead
     // of 5-second maintenance ticks (there's no multi-minute "stable connection"
     // clock left once the radio is torn down every cycle). See wifi_connect.rs.
-    let mut tx_power = wifi_connect::TX_POWER_MAX;
+    let mut tx_power = TX_POWER_FIXED.unwrap_or(wifi_connect::TX_POWER_MAX);
     let mut success_streak: u32 = 0;
     #[cfg(feature = "log-server")]
     let (mut fetch_ok_total, mut fetch_fail_total, mut prev_radio_on_ms) = (0u32, 0u32, 0u32);
@@ -256,14 +256,23 @@ async fn teardown(controller: &mut WifiController<'static>) {
 
 /// Lock TX power at max after any failure — same "this board needs the headroom
 /// after trouble" behavior as the old design's `tx_locked` flag.
+/// Measurement aid: `TX_POWER_FIXED` (quarter-dBm) at build time pins TX power
+/// and turns the adaptive stepping off, so builds compared on the PPK2 transmit
+/// the same. Unset or 0 = adaptive.
+const TX_POWER_FIXED: Option<i8> =
+    match crate::power::parse_u32(option_env!("TX_POWER_FIXED"), 0) {
+        0 => None,
+        q => Some(q as i8),
+    };
+
 fn reset_tx_power(tx_power: &mut i8, success_streak: &mut u32) {
-    *tx_power = wifi_connect::TX_POWER_MAX;
+    *tx_power = TX_POWER_FIXED.unwrap_or(wifi_connect::TX_POWER_MAX);
     *success_streak = 0;
 }
 
 /// After enough consecutive successful cycles, probe one step lower.
 fn step_tx_power_on_success(tx_power: &mut i8, success_streak: &mut u32) {
-    if *tx_power <= wifi_connect::TX_POWER_MIN {
+    if TX_POWER_FIXED.is_some() || *tx_power <= wifi_connect::TX_POWER_MIN {
         return;
     }
     *success_streak = success_streak.saturating_add(1);

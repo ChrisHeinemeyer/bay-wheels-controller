@@ -39,6 +39,27 @@ use core::sync::atomic::AtomicBool;
 /// - 3: WiFi/modem power domain off. The radio is stopped during every nap.
 pub const SLEEP_CFG: u32 = parse_u32(option_env!("SLEEP_CFG"), 0);
 
+/// Highest `SLEEP_CFG` level.
+pub const SLEEP_CFG_MAX: u32 = 3;
+
+/// Measurement aid: with `SLEEP_SWEEP_S` set at build time, the level steps
+/// through 0..=`SLEEP_CFG_MAX` every that many seconds of uptime (repeating),
+/// so one PPK2 recording covers every level. 0 = off, use `SLEEP_CFG`.
+const SLEEP_SWEEP_S: u32 = parse_u32(option_env!("SLEEP_SWEEP_S"), 0);
+
+/// The light-sleep level in effect now.
+pub fn sleep_level() -> u32 {
+    if SLEEP_SWEEP_S == 0 {
+        return SLEEP_CFG;
+    }
+    // esp-hal's clock, not embassy's: this runs in the idle hook.
+    let uptime_s = esp_hal::time::Instant::now()
+        .duration_since_epoch()
+        .as_secs();
+    let step = uptime_s / SLEEP_SWEEP_S as u64;
+    (step % (SLEEP_CFG_MAX as u64 + 1)) as u32
+}
+
 /// `option_env!` value as a number, or `default` if unset. Fails the build on
 /// anything but ASCII digits.
 pub const fn parse_u32(s: Option<&str>, default: u32) -> u32 {
@@ -109,7 +130,8 @@ mod inner {
     /// Longest single nap, used when no task deadline is armed.
     const MAX_NAP_US: u64 = 1_000_000;
     /// Don't sleep if the next deadline is closer than this — `waiti` instead.
-    const MIN_NAP_US: u64 = 5_000;
+    /// `MIN_NAP_US` at build time overrides it.
+    const MIN_NAP_US: u64 = super::parse_u32(option_env!("MIN_NAP_US"), 5_000) as u64;
     /// End each nap this long before the deadline, to absorb wake-up latency.
     const WAKE_MARGIN_US: u64 = 2_000;
     /// After an overslept nap, leave TIMG1 this far short of its alarm so the
@@ -138,7 +160,8 @@ mod inner {
 
     struct State {
         rtc: Rtc<'static>,
-        sleep_cfg: RtcSleepConfig,
+        /// One per level, indexed by `super::sleep_level()`.
+        sleep_cfgs: [RtcSleepConfig; super::SLEEP_CFG_MAX as usize + 1],
         wake_button: Ext0WakeupSource<GPIO2<'static>>,
         /// No sleep until `Instant::now()` passes this (boot grace / button window).
         awake_until_us: u64,
@@ -214,7 +237,7 @@ mod inner {
             unsafe {
                 *STATE.0.get() = Some(State {
                     rtc,
-                    sleep_cfg: sleep_config(),
+                    sleep_cfgs: core::array::from_fn(|level| sleep_config(level as u32)),
                     wake_button,
                     awake_until_us: BOOT_GRACE.as_micros() as u64,
                     sleeping: false,
@@ -229,16 +252,16 @@ mod inner {
         });
     }
 
-    /// The `RtcSleepConfig` for `super::SLEEP_CFG`. Level 2 values are ESP-IDF's
+    /// The `RtcSleepConfig` for a `super::SLEEP_CFG` level. Level 2 values are ESP-IDF's
     /// `rtc_sleep_get_default_config` light-sleep branch with XTAL and 8M
     /// powered down (esp32s3 `rtc.h`: `RTC_CNTL_DBIAS_SLP` = 5,
     /// `RTC_CNTL_DBG_ATTEN_LIGHTSLEEP_DEFAULT` = 5, bias/pd_cur DEFAULT = 1).
-    fn sleep_config() -> RtcSleepConfig {
+    fn sleep_config(level: u32) -> RtcSleepConfig {
         let mut cfg = RtcSleepConfig::default();
-        if super::SLEEP_CFG >= 1 {
+        if level >= 1 {
             cfg.set_int_8m_pd_en(true);
         }
-        if super::SLEEP_CFG >= 2 {
+        if level >= 2 {
             cfg.set_rtc_regulator_fpu(true);
             cfg.set_dbg_atten_slp(5);
             cfg.set_dig_dbias_slp(5);
@@ -247,7 +270,7 @@ mod inner {
             cfg.set_bias_sleep_monitor(true);
             cfg.set_pd_cur_monitor(true);
         }
-        if super::SLEEP_CFG >= 3 {
+        if level >= 3 {
             cfg.set_modem_pd_en(true);
         }
         cfg
@@ -451,7 +474,7 @@ mod inner {
         let timer = TimerWakeupSource::new(Duration::from_micros(nominal_us));
         // The wake alarm is set relative to an RTC read inside `sleep_light`.
         latch_rtc_time();
-        let cfg = state.sleep_cfg;
+        let cfg = state.sleep_cfgs[super::sleep_level() as usize];
         state.rtc.sleep(&cfg, &[&timer, &state.wake_button]);
 
         let cause = LPWR::regs().slp_wakeup_cause().read().wakeup_cause().bits();

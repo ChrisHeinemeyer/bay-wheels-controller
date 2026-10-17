@@ -84,8 +84,9 @@ def cycle(o, off_s):
     click.echo(f"DUT power-cycled ({off_s}s off), on at {o['mv']} mV")
 
 
-def collect(ppk, seconds):
-    """Stream for `seconds` and return 1 ms bin means in mA."""
+def collect(ppk, seconds, progress=None):
+    """Stream for `seconds` and return 1 ms bin means in mA. Every 10 s, appends
+    "<seconds> <last-10s mA>" to the `progress` file if given."""
     bins, acc, n = [], 0.0, 0
     ppk.start_measuring()
     end = time.monotonic() + seconds
@@ -110,6 +111,9 @@ def collect(ppk, seconds):
                     f"  {len(bins) / 1000:6.0f}s  last 10s avg {statistics.fmean(recent):6.2f} mA",
                     err=True,
                 )
+                if progress:
+                    progress.write(f"{len(bins) / 1000:.0f} {statistics.fmean(recent):.3f}\n")
+                    progress.flush()
     finally:
         ppk.stop_measuring()
     return bins
@@ -151,13 +155,17 @@ def summarize(bins, sleep_max, radio_min):
 @click.option("--csv", "csv_path", type=click.Path(dir_okay=False), help="Write 1 ms bins")
 @click.option("--json", "json_path", type=click.Path(dir_okay=False), help="Write summary")
 @click.option("--label", default="", help="Stored in the JSON summary")
+@click.option("--progress", "progress_path", type=click.Path(dir_okay=False),
+              help="Append a line every 10 s (for watching long runs)")
 @click.pass_obj
-def measure(o, seconds, sleep_max, radio_min, power_on, csv_path, json_path, label):
+def measure(o, seconds, sleep_max, radio_min, power_on, csv_path, json_path, label,
+            progress_path):
     """Measure current for a while and print a summary."""
     ppk = open_ppk(o["port"], o["mv"])
     if power_on:
         ppk.toggle_DUT_power("ON")
-    bins = collect(ppk, seconds)
+    progress = open(progress_path, "a") if progress_path else None
+    bins = collect(ppk, seconds, progress)
     s = summarize(bins, sleep_max, radio_min)
     s.update(label=label, supply_mv=o["mv"], started_at=time.time() - s["seconds"])
 
@@ -175,6 +183,44 @@ def measure(o, seconds, sleep_max, radio_min, power_on, csv_path, json_path, lab
     if json_path:
         with open(json_path, "w") as f:
             json.dump(s, f, indent=2)
+
+
+@cli.command()
+@click.argument("csv_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("-w", "--window", required=True, type=float, help="Window length, seconds")
+@click.option("--offset", default=0.0, show_default=True,
+              help="Seconds from the start of the CSV to board uptime 0")
+@click.option("--trim", default=15.0, show_default=True,
+              help="Seconds dropped at each window edge")
+@click.option("--levels", default=4, show_default=True,
+              help="Windows repeat with this period (SLEEP_SWEEP_S levels)")
+@click.option("--sleep-max", default=25.0, show_default=True)
+@click.option("--radio-min", default=80.0, show_default=True)
+def windows(csv_path, window, offset, trim, levels, sleep_max, radio_min):
+    """Summarize a `measure --csv` recording per fixed-length window.
+
+    For a SLEEP_SWEEP_S build, use the same window: window n is level n % levels.
+    """
+    with open(csv_path) as f:
+        r = csv.reader(f)
+        next(r)
+        bins = [float(row[1]) for row in r]
+    w_ms, o_ms, t_ms = int(window * 1000), int(offset * 1000), int(trim * 1000)
+    n = 0
+    click.echo("win level   secs   avg mA  asleep% (mA)    awake% (mA)    radio% (mA)")
+    while o_ms + n * w_ms + t_ms < len(bins):
+        lo = o_ms + n * w_ms + t_ms
+        hi = min(o_ms + (n + 1) * w_ms - t_ms, len(bins))
+        if hi - lo < 10_000:
+            break
+        s = summarize(bins[lo:hi], sleep_max, radio_min)
+        cols = []
+        for name in ("asleep", "awake", "radio"):
+            c = s["split"][name]
+            avg = f"{c['avg_ma']:5.1f}" if c["avg_ma"] is not None else "  —  "
+            cols.append(f"{c['share'] * 100:5.1f}% ({avg})")
+        click.echo(f"{n:3} {n % levels:5} {s['seconds']:6.0f} {s['avg_ma']:8.2f}  " + "  ".join(cols))
+        n += 1
 
 
 if __name__ == "__main__":
