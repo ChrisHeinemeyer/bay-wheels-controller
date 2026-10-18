@@ -183,6 +183,16 @@ the battery curve in [[Task-Battery#Calibration (2026-10-17)]]. If
 ~6.7 days. That is ~13mA at 2,100mAh. Only a PPK2 average or a run from
 fresh cells can settle the current.
 
+## Optimization rounds (2026-10-17)
+
+PPK2 experiments took the average from ~20mA to **9.6-12mA** at the 120s
+gap: light-sleep config level 2 (asleep 11.9 → 4.4mA), a LAN GBFS mirror on
+the HA add-on (fetch 4.1s → ~50ms), DHCP lease reuse, and smoltcp ARP/DHCP
+patches. An AP-side loss of unicast for 1-3s after re-association is still
+unsolved. Awake time (~5.1mA) is now the biggest part. Full record:
+[[Power-Optimization-Log]]. The section below predates this work; its sleep
+config experiment is done (`SLEEP_CFG`, default 2).
+
 ## Next: reduce sleep current (biggest lever)
 
 Sleep is ~9mA of the ~20mA. An S3 in a well-configured light sleep needs well
