@@ -45,19 +45,6 @@ const RETRY_GAP: Duration = Duration::from_secs(60);
 const SUCCESS_GAP: Duration =
     Duration::from_secs(crate::power::parse_u32(option_env!("FETCH_GAP_S"), 120) as u64);
 
-/// Build-time pause between the WiFi disconnect and stopping the radio.
-const TEARDOWN_WAIT_MS: u32 = crate::power::parse_u32(option_env!("TEARDOWN_WAIT_MS"), 0);
-
-/// DEAUTH=0 (build-time) stops the radio without disconnecting first
-/// (experiment: leave the AP's session in place for the next connect).
-const DEAUTH: bool = crate::power::parse_u32(option_env!("DEAUTH"), 1) != 0;
-
-/// DOZE=1 (build-time): after connecting, wait in WiFi power save until the
-/// mirror host's UDP echo gets through, then fetch (`gbfs-mirror` only).
-const DOZE: bool = crate::power::parse_u32(option_env!("DOZE"), 0) != 0;
-/// Longest doze before fetching anyway.
-const DOZE_LIMIT: Duration = Duration::from_secs(4);
-
 /// GARP=0 (build-time) skips the gratuitous ARP after each connect.
 const GARP: bool = crate::power::parse_u32(option_env!("GARP"), 1) != 0;
 
@@ -78,18 +65,6 @@ pub struct FetchTimings {
     /// Time inside the station parser, summed over chunks.
     pub parse_ms: u32,
     pub body_bytes: u32,
-    /// Mirror only: ms from the start of the TCP connect to the first
-    /// broadcast/multicast and the first unicast frame received (`None` if
-    /// none arrived before the connect succeeded).
-    pub first_group_rx_ms: Option<u32>,
-    pub first_unicast_rx_ms: Option<u32>,
-    /// Mirror only: the first UDP probe echo from the mirror host, as (ms from
-    /// the start of the TCP connect, sequence number of the echoed probe).
-    /// Probes go out every `PROBE_INTERVAL` from the start.
-    pub first_echo: Option<(u32, u16)>,
-    /// `DOZE` builds: ms spent dozing before the fetch, and whether it ended
-    /// on an echo (rather than at `DOZE_LIMIT`).
-    pub doze: Option<(u32, bool)>,
 }
 
 /// Outcome of one fetch attempt over a freshly-opened connection.
@@ -259,23 +234,13 @@ pub async fn fetch_task(
         }
 
         let mut timings = FetchTimings::default();
-        // Doze until unicast toward us gets through (see wait_for_downlink).
-        #[cfg(feature = "gbfs-mirror")]
-        if DOZE {
-            let doze_start = Instant::now();
-            let _ = controller.set_power_saving(PowerSaveMode::Minimum);
-            let echo = super::mirror::wait_for_downlink(*stack, DOZE_LIMIT).await;
-            let _ = controller.set_power_saving(PowerSaveMode::None);
-            let doze_ms = Instant::now().duration_since(doze_start).as_millis() as u32;
-            timings.doze = Some((doze_ms, echo.is_some()));
-        }
         let fetch = async {
             #[cfg(feature = "gbfs-mirror")]
             {
                 use super::mirror;
                 match with_timeout(
                     mirror::MIRROR_TIMEOUT,
-                    mirror::fetch(*stack, &tcp_client, &mirror_path, &mut timings),
+                    mirror::fetch(&tcp_client, &mirror_path, &mut timings),
                 )
                 .await
                 {
@@ -367,15 +332,7 @@ pub async fn fetch_task(
 /// Disconnects and stops the radio, tolerating "already stopped".
 async fn teardown(controller: &mut WifiController<'static>) {
     if controller.is_started().unwrap_or(false) {
-        if DEAUTH {
-            let _ = controller.disconnect_async().await;
-        }
-        // Give the deauth frame time to actually go out before the radio
-        // stops, so the AP drops this association instead of holding stale
-        // state when we come back (experiment).
-        if TEARDOWN_WAIT_MS > 0 {
-            Timer::after_millis(TEARDOWN_WAIT_MS as u64).await;
-        }
+        let _ = controller.disconnect_async().await;
         let _ = controller.stop_async().await;
     }
     // Only let the CPU light-sleep once the radio is confirmed stopped; an

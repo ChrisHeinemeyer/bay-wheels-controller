@@ -182,10 +182,6 @@ impl Config {
     }
 }
 
-/// PATCHED (bay-wheels-controller): broadcast/multicast frames received.
-pub static RX_GROUP_FRAMES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-/// PATCHED (bay-wheels-controller): unicast frames received.
-pub static RX_UNICAST_FRAMES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// PATCHED (bay-wheels-controller): set to make the next `poll` broadcast a
 /// gratuitous ARP for our IPv4 address. The firmware sets it after each WiFi
 /// re-association, so the LAN learns where the station is before the first
@@ -636,14 +632,6 @@ impl Interface {
         rx_token.consume(|frame| {
             if frame.is_empty() {
                 return PollIngressSingleResult::PacketProcessed;
-            }
-            // PATCHED (bay-wheels-controller): count received frames, so the
-            // firmware can see when traffic first arrives after re-association.
-            {
-                use core::sync::atomic::Ordering;
-                let group = frame[0] & 1 != 0; // Ethernet I/G bit of the destination
-                if group { &RX_GROUP_FRAMES } else { &RX_UNICAST_FRAMES }
-                    .fetch_add(1, Ordering::Relaxed);
             }
 
             match self.inner.caps.medium {
