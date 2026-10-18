@@ -11,6 +11,8 @@
 //!   in standby (CHIP_EN register bit 0, its power-on value).
 //! - 2: as 1, but LED_EN low too: AL5887 in hardware shutdown.
 //! - 3: every board pin high-impedance (no output, input buffer or pull).
+//! - 4: as 3, with a timer-only wake (RTC peripherals powered down too): the
+//!   ESP32's lowest deep-sleep state. Only a power cycle escapes it.
 //!
 //! Escape hatch: a GPIO2 (provisioning button) press wakes the chip, which
 //! boots into this same window again. A power cycle clears the pad holds.
@@ -22,7 +24,7 @@ use esp_hal::gpio::{
 };
 use esp_hal::peripherals::{GPIO2, LPWR, Peripherals};
 use esp_hal::rtc_cntl::Rtc;
-use esp_hal::rtc_cntl::sleep::{Ext0WakeupSource, WakeupLevel};
+use esp_hal::rtc_cntl::sleep::{Ext0WakeupSource, TimerWakeupSource, WakeupLevel};
 
 /// `DEEP_SLEEP_TEST` build env var, see the module docs.
 pub const DEEP_SLEEP_TEST: u32 = crate::power::parse_u32(option_env!("DEEP_SLEEP_TEST"), 0);
@@ -66,6 +68,9 @@ pub fn run(p: Peripherals) -> ! {
             isolated(p.GPIO38),
             isolated(p.GPIO5),
         );
+        if DEEP_SLEEP_TEST >= 4 {
+            sleep_timer_only(rtc);
+        }
         sleep(rtc, p.GPIO2);
     }
 
@@ -99,6 +104,14 @@ pub fn run(p: Peripherals) -> ! {
         isolated(p.GPIO5),
     );
     sleep(rtc, p.GPIO2)
+}
+
+/// Deep sleep with only a (1 hour) timer wake: no ext0, so the RTC peripheral
+/// domain powers down too. A power cycle is the only way back before then.
+fn sleep_timer_only(mut rtc: Rtc<'static>) -> ! {
+    crate::dprintln!("DEEP_SLEEP_TEST: entering deep sleep (timer wake only)");
+    let timer = TimerWakeupSource::new(core::time::Duration::from_secs(3600));
+    rtc.sleep_deep(&[&timer])
 }
 
 fn sleep(mut rtc: Rtc<'static>, wake_button: GPIO2<'static>) -> ! {

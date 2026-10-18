@@ -151,9 +151,21 @@ total (37µA at 4.5V), AL5887 ~15µA, ESP32 deep sleep ~10-20µA. No power LED.
   inputs are unlikely to be the drain.
 - `DEEP_SLEEP_TEST=3` (`deep-hiz`, every board pin high-impedance): 1.62-1.63mA,
   the same as with the pins driven (1.61mA). No ESP32 pin is pushing current.
-- So the remaining ~1.4mA is hardware outside the ESP32's pins. Next: power
-  the 3.3V rail directly from the PPK2 (LDO bypassed) to split LDO / battery
-  side from the 3.3V parts.
+- So the remaining ~1.4mA is hardware outside the ESP32's pins.
+- Schematics (controller + map, 2026-10-18): LDO is an AP2112M-3.3 (55µA typ),
+  battery divider R18/R19 100k+22k on V_BAT, grid lines have 10k pull-ups and
+  ESD321 diodes (nA leakage), map RGB LED anodes on V_BAT into the AL5887.
+- **Map board unplugged:** no step down at the unplug (then a slow rise from
+  the now-floating 74HC165 inputs). The map board is not the drain.
+- **Supply sweep** (deep sleep): 3.7V 1.60, 4.0V 1.675, 4.5V 1.68, 5.0V
+  1.69mA. Not proportional to supply voltage: not a resistor on V_BAT.
+- **`DEEP_SLEEP_TEST=4` (`deep-min`, timer wake only, RTC peripherals off,
+  pins hi-Z):** 1.29-1.39mA, drifting down. RTC peripherals on cost ~0.25mA.
+- **RST held (ESP32 powered down, CHIP_PU low):** 1.67mA = the 1.33mA before
+  + 0.33mA through R1 (10k CHIP_PU pull-up). **The ESP32 is not the drain.**
+- Left: the AL5887 (VIN on V_IN, internal regulator; its constant draw would
+  also look voltage-independent) or the five 74HC165s. Next: lift VCC (pin 16)
+  on U2-U6; if nothing changes, it is the AL5887.
 
 Not done: `rtc-peri-pd` hang root cause (likely the timer or GPIO wake path
 with the RTC peripheral domain off in esp-hal 1.0; not worth chasing before
