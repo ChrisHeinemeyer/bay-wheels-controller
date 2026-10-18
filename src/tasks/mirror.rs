@@ -11,8 +11,10 @@
 use core::fmt::Write as _;
 use core::net::SocketAddr;
 
-use embassy_net::tcp::client::TcpClient;
 use embassy_futures::select::{Either, select};
+use embassy_net::{IpAddress, IpEndpoint, Stack};
+use embassy_net::tcp::client::TcpClient;
+use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::{Read as _, Write as _};
 use embedded_nal_async::TcpConnect as _;
@@ -63,6 +65,7 @@ pub fn request_path(board: BoardId) -> RequestPath {
 /// One plain-HTTP GET of `path` from the mirror, streamed through the parser.
 /// `Ok` only once the stations are published; the caller falls back otherwise.
 pub async fn fetch<const N: usize, const TX: usize, const RX: usize>(
+    stack: Stack<'static>,
     tcp: &TcpClient<'static, N, TX, RX>,
     path: &str,
     timings: &mut FetchTimings,
@@ -74,15 +77,18 @@ pub async fn fetch<const N: usize, const TX: usize, const RX: usize>(
     // every CONNECT_RETRY gets in as soon as the link passes frames, and
     // `handshake_ms` then measures that dead time.
     let mut rx = RxWatch::new(connect_start);
+    let mut probe = Probe::new(stack, addr, connect_start);
     let mut conn = loop {
-        match with_timeout(CONNECT_RETRY, select(tcp.connect(addr), rx.run(timings))).await {
+        let watch = select(rx.run(timings), probe.run());
+        match with_timeout(CONNECT_RETRY, select(tcp.connect(addr), watch)).await {
             Ok(Either::First(Ok(conn))) => break conn,
             Ok(Either::First(Err(_))) => return Err("connect"),
-            Ok(Either::Second(never)) => match never {},
+            Ok(Either::Second(Either::First(never) | Either::Second(never))) => match never {},
             Err(_) => continue, // the outer MIRROR_TIMEOUT bounds this
         }
     };
     rx.check(timings);
+    timings.first_echo = probe.first_echo;
     timings.handshake_ms = ms_since(connect_start);
 
     let request_start = Instant::now();
@@ -146,7 +152,11 @@ struct RxWatch {
 impl RxWatch {
     fn new(start: Instant) -> Self {
         let (group0, unicast0) = rx_frames();
-        Self { start, group0, unicast0 }
+        Self {
+            start,
+            group0,
+            unicast0,
+        }
     }
 
     fn check(&self, timings: &mut FetchTimings) {
@@ -163,6 +173,71 @@ impl RxWatch {
         loop {
             self.check(timings);
             Timer::after_millis(5).await;
+        }
+    }
+}
+
+/// How often a UDP probe goes to the mirror host during the connect.
+const PROBE_INTERVAL: Duration = Duration::from_millis(20);
+
+/// Numbered UDP probes to the mirror host's port, which logs their arrival
+/// and echoes them back. The host's log shows when our uplink starts passing
+/// frames, the first echo when the round trip does.
+struct Probe {
+    socket: UdpSocket<'static>,
+    dest: IpEndpoint,
+    start: Instant,
+    seq: u16,
+    cycle: u16,
+    first_echo: Option<(u32, u16)>,
+}
+
+impl Probe {
+    fn new(stack: Stack<'static>, dest: SocketAddr, start: Instant) -> Self {
+        // Only one fetch cycle runs at a time, so these buffers are never
+        // shared; the socket is dropped (and the slot freed) with the Probe.
+        static mut RX_META: [PacketMetadata; 8] = [PacketMetadata::EMPTY; 8];
+        static mut TX_META: [PacketMetadata; 8] = [PacketMetadata::EMPTY; 8];
+        static mut RX_BUF: [u8; 256] = [0; 256];
+        static mut TX_BUF: [u8; 256] = [0; 256];
+        static CYCLE: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
+        #[allow(static_mut_refs)]
+        let mut socket = unsafe {
+            UdpSocket::new(stack, &mut RX_META, &mut RX_BUF, &mut TX_META, &mut TX_BUF)
+        };
+        let _ = socket.bind(40_000);
+        let dest = match dest {
+            SocketAddr::V4(v4) => IpEndpoint::new(IpAddress::Ipv4(*v4.ip()), v4.port()),
+            SocketAddr::V6(_) => unreachable!("GBFS_MIRROR is an IPv4 address"),
+        };
+        Self {
+            socket,
+            dest,
+            start,
+            seq: 0,
+            cycle: CYCLE.fetch_add(1, core::sync::atomic::Ordering::Relaxed),
+            first_echo: None,
+        }
+    }
+
+    async fn run(&mut self) -> core::convert::Infallible {
+        let mut buf = [0u8; 16];
+        loop {
+            // "BWP" cycle seq
+            let mut msg = [b'B', b'W', b'P', 0, 0, 0, 0];
+            msg[3..5].copy_from_slice(&self.cycle.to_be_bytes());
+            msg[5..7].copy_from_slice(&self.seq.to_be_bytes());
+            let _ = self.socket.send_to(&msg, self.dest).await;
+            self.seq = self.seq.wrapping_add(1);
+            let next = Instant::now() + PROBE_INTERVAL;
+            while let Ok(Ok((n, _))) =
+                embassy_time::with_deadline(next, self.socket.recv_from(&mut buf)).await
+            {
+                if self.first_echo.is_none() && n >= 7 && buf[..3] == *b"BWP" {
+                    let seq = u16::from_be_bytes([buf[5], buf[6]]);
+                    self.first_echo = Some((ms_since(self.start), seq));
+                }
+            }
         }
     }
 }

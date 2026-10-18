@@ -10,6 +10,7 @@ Standard library only, so the add-on image is just Alpine + python3.
 import html
 import json
 import os
+import socket
 import threading
 import time
 import urllib.request
@@ -91,6 +92,29 @@ def mirror_response(query):
             "data": {"stations": stations},
         }
     return 200, json.dumps(body)
+
+
+# Connect-time UDP probes from the firmware ("BWP" + cycle + seq, see
+# src/tasks/mirror.rs): logged with their arrival time and echoed back, to see
+# when a freshly associated board's uplink starts passing frames.
+probes = deque(maxlen=5000)
+
+
+def probe_loop():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", PORT))
+    while True:
+        data, addr = sock.recvfrom(64)
+        if len(data) < 7 or data[:3] != b"BWP":
+            continue
+        sock.sendto(data, addr)
+        with lock:
+            probes.append({
+                "t": time.time(),
+                "remote": addr[0],
+                "cycle": int.from_bytes(data[3:5], "big"),
+                "seq": int.from_bytes(data[5:7], "big"),
+            })
 
 
 def load():
@@ -396,6 +420,10 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 data = list(reports)[-max(1, min(limit, KEEP)) :]
             return self._send(200, json.dumps(data), "application/json")
+        if url.path == "/api/probes":
+            with lock:
+                data = list(probes)
+            return self._send(200, json.dumps(data), "application/json")
         if url.path == "/healthz":
             return self._send(200, "ok\n")
         if url.path == "/gbfs/station_status.json":
@@ -407,5 +435,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     load()
     threading.Thread(target=mirror_loop, daemon=True).start()
+    threading.Thread(target=probe_loop, daemon=True).start()
     print(f"Bay Wheels Log listening on :{PORT}, {len(reports)} reports loaded from {LOG_PATH}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

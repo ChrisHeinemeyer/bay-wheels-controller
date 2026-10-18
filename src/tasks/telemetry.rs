@@ -166,7 +166,8 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
          \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{},\
          \"sleep_cfg\":{},\"min_nap_us\":{},\"handshake_ms\":{},\"ttfb_ms\":{},\
          \"body_ms\":{},\"parse_ms\":{},\"body_bytes\":{},\"src\":\"{}\",\"lease\":\"{}\",\"lease_s\":{},\
-         \"first_group_rx_ms\":{},\"first_unicast_rx_ms\":{}",
+         \"first_group_rx_ms\":{},\"first_unicast_rx_ms\":{},\
+         \"first_echo_ms\":{},\"first_echo_seq\":{}",
         cycle.connect_ms,
         cycle.dhcp_ms,
         cycle.fetch_ms,
@@ -199,6 +200,8 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         smoltcp::socket::dhcpv4::LAST_LEASE_SECS.load(core::sync::atomic::Ordering::Relaxed),
         cycle.timings.first_group_rx_ms.map_or(-1, |v| v as i64),
         cycle.timings.first_unicast_rx_ms.map_or(-1, |v| v as i64),
+        cycle.timings.first_echo.map_or(-1, |(ms, _)| ms as i64),
+        cycle.timings.first_echo.map_or(-1, |(_, seq)| seq as i64),
     );
 
     let mut summary = heapless::String::<256>::new();

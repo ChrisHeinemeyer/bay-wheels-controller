@@ -9,7 +9,7 @@ pub fn create_network_stack(
     &'static Stack<'static>,
     Runner<'static, WifiDevice<'static>>,
 ) {
-    static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+    static RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
     static STACK: StaticCell<Stack<'static>> = StaticCell::new();
 
     let resources = RESOURCES.init(StackResources::new());

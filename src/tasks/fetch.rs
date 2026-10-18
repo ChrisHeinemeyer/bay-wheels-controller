@@ -67,6 +67,10 @@ pub struct FetchTimings {
     /// none arrived before the connect succeeded).
     pub first_group_rx_ms: Option<u32>,
     pub first_unicast_rx_ms: Option<u32>,
+    /// Mirror only: the first UDP probe echo from the mirror host, as (ms from
+    /// the start of the TCP connect, sequence number of the echoed probe).
+    /// Probes go out every `PROBE_INTERVAL` from the start.
+    pub first_echo: Option<(u32, u16)>,
 }
 
 /// Outcome of one fetch attempt over a freshly-opened connection.
@@ -236,7 +240,7 @@ pub async fn fetch_task(
                 use super::mirror;
                 match with_timeout(
                     mirror::MIRROR_TIMEOUT,
-                    mirror::fetch(&tcp_client, &mirror_path, &mut timings),
+                    mirror::fetch(*stack, &tcp_client, &mirror_path, &mut timings),
                 )
                 .await
                 {
