@@ -42,6 +42,21 @@ const RETRY_GAP: Duration = Duration::from_secs(60);
 const SUCCESS_GAP: Duration =
     Duration::from_secs(crate::power::parse_u32(option_env!("FETCH_GAP_S"), 120) as u64);
 
+/// Where the fetch's radio-on time goes. `body_ms - parse_ms` is time spent
+/// waiting on the network and in TLS decryption; `parse_ms` is CPU-only.
+#[derive(Default, Clone, Copy)]
+pub struct FetchTimings {
+    /// DNS + TCP connect + TLS handshake (`client.resource()`).
+    pub handshake_ms: u32,
+    /// GET sent → response headers read.
+    pub ttfb_ms: u32,
+    /// Response headers → body fully read and parsed.
+    pub body_ms: u32,
+    /// Time inside the station parser, summed over chunks.
+    pub parse_ms: u32,
+    pub body_bytes: u32,
+}
+
 /// Outcome of one fetch attempt over a freshly-opened connection.
 enum FetchOutcome {
     /// Body streamed and parsed successfully.
@@ -176,9 +191,16 @@ pub async fn fetch_task(
             heap_steps.after_dhcp = heap();
         }
 
+        let mut timings = FetchTimings::default();
         let outcome = match with_timeout(
             FETCH_TIMEOUT,
-            do_one_fetch(&tcp_client, &dns_socket, tls_read_buffer, tls_write_buffer),
+            do_one_fetch(
+                &tcp_client,
+                &dns_socket,
+                tls_read_buffer,
+                tls_write_buffer,
+                &mut timings,
+            ),
         )
         .await
         {
@@ -208,6 +230,7 @@ pub async fn fetch_task(
                 fetch_ms: ms(dhcp_at, Instant::now()),
                 prev_radio_on_ms,
                 heap: heap_steps,
+                timings,
             };
             super::telemetry::send_report(&tcp_client, &report).await;
         }
@@ -222,7 +245,7 @@ pub async fn fetch_task(
             prev_heap_after_teardown = heap();
         }
         #[cfg(not(feature = "log-server"))]
-        let _ = (cycle_start, connected_at, dhcp_at);
+        let _ = (cycle_start, connected_at, dhcp_at, timings);
 
         let wait = match outcome {
             FetchOutcome::Success => {
@@ -296,6 +319,7 @@ async fn do_one_fetch(
     dns_socket: &DnsSocket<'static>,
     tls_read_buffer: &mut [u8],
     tls_write_buffer: &mut [u8],
+    timings: &mut FetchTimings,
 ) -> FetchOutcome {
     let tls_config = TlsConfig::new(
         0, // seed for RNG
@@ -307,6 +331,7 @@ async fn do_one_fetch(
 
     crate::dprintln!("");
     crate::dprintln!("=== Connecting to {} (DNS+TCP+TLS) ===", HOST_URL);
+    let handshake_start = Instant::now();
     let mut resource = match with_timeout(Duration::from_secs(30), client.resource(HOST_URL)).await
     {
         Ok(Ok(r)) => {
@@ -323,14 +348,22 @@ async fn do_one_fetch(
         }
     };
     crate::dprintln!("✓ Connected");
+    timings.handshake_ms = ms_since(handshake_start);
 
     crate::dprintln!("=== Fetching {} ===", PATH);
-    fetch_once(&mut resource).await
+    fetch_once(&mut resource, timings).await
+}
+
+fn ms_since(from: Instant) -> u32 {
+    Instant::now().duration_since(from).as_millis() as u32
 }
 
 /// Sends one GET over an already-connected `resource` and streams+parses the response.
 /// Returns `ConnectionLost` on any transport-level error, signalling the caller to reconnect.
-async fn fetch_once<C>(resource: &mut reqwless::client::HttpResource<'_, C>) -> FetchOutcome
+async fn fetch_once<C>(
+    resource: &mut reqwless::client::HttpResource<'_, C>,
+    timings: &mut FetchTimings,
+) -> FetchOutcome
 where
     C: embedded_io_async::Read + embedded_io_async::Write,
 {
@@ -342,6 +375,7 @@ where
         .get(PATH)
         .headers(&[("User-Agent", "ESP32-S3/1.0"), ("Accept", "*/*")]);
 
+    let request_start = Instant::now();
     let response = match request.send(&mut headers_buf).await {
         Ok(response) => response,
         Err(e) => {
@@ -351,6 +385,9 @@ where
     };
 
     crate::dprintln!("✓ Status: {:?}", response.status);
+    timings.ttfb_ms = ms_since(request_start);
+    let body_start = Instant::now();
+    let mut parse_us: u64 = 0;
 
     let mut body_reader = response.body().reader();
     let mut parser = StreamingStationParser::new(TARGET_STATIONS);
@@ -367,6 +404,9 @@ where
             Ok(0) => {
                 crate::dprintln!("✓ Stream complete! Total: {} bytes", total_bytes);
                 parser.finish();
+                timings.body_ms = ms_since(body_start);
+                timings.parse_ms = (parse_us / 1000) as u32;
+                timings.body_bytes = total_bytes as u32;
                 crate::dprintln!("✓ Found {} matching stations total", stations_found);
                 STATION_DATA_SIGNAL.signal(station_data);
                 STATUS.lock().await.last_fetch_at = Some(Instant::now());
@@ -376,6 +416,7 @@ where
             Ok(n) => {
                 total_bytes += n;
                 // Parse this chunk incrementally
+                let parse_start = Instant::now();
                 if let Ok(chunk_str) = core::str::from_utf8(&chunk_buf[..n]) {
                     let stations = parser.process_chunk(chunk_str);
                     stations_found += stations.len();
@@ -385,6 +426,7 @@ where
                             station_data[station.station_idx as usize] = *station;
                         }
                     }
+                    parse_us += Instant::now().duration_since(parse_start).as_micros();
                 } else {
                     crate::dprintln!("  Warning: Invalid UTF-8 in chunk");
                 }

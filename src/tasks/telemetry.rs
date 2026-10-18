@@ -40,6 +40,7 @@ pub struct CycleReport {
     /// Whole radio-on window of the previous cycle (this one's isn't over).
     pub prev_radio_on_ms: u32,
     pub heap: HeapSteps,
+    pub timings: super::fetch::FetchTimings,
 }
 
 /// Free heap (bytes) at each step of the WiFi cycle, to localize a leak.
@@ -161,7 +162,8 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
          \"spurious_ext0_total\":{},\"rc_scale_ppm\":{},\"heap_free\":{},\
          \"heap_prev_after_teardown\":{},\"heap_cycle_start\":{},\"heap_after_start\":{},\
          \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{},\
-         \"sleep_cfg\":{},\"min_nap_us\":{}",
+         \"sleep_cfg\":{},\"min_nap_us\":{},\"handshake_ms\":{},\"ttfb_ms\":{},\
+         \"body_ms\":{},\"parse_ms\":{},\"body_bytes\":{}",
         cycle.connect_ms,
         cycle.dhcp_ms,
         cycle.fetch_ms,
@@ -180,6 +182,11 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         cycle.heap.after_fetch,
         crate::power::sleep_level(),
         crate::power::min_nap_us(),
+        cycle.timings.handshake_ms,
+        cycle.timings.ttfb_ms,
+        cycle.timings.body_ms,
+        cycle.timings.parse_ms,
+        cycle.timings.body_bytes,
     );
 
     let mut summary = heapless::String::<256>::new();
