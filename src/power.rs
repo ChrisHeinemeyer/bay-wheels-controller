@@ -34,6 +34,20 @@ use core::sync::atomic::AtomicBool;
 /// Sweeping 5 down to 2.5 ms made no measurable difference (2026-10-17).
 const MIN_NAP_US: u32 = 5_000;
 
+/// Sleep-floor experiments (Sleep-Floor-Plan.md step 1), build env vars,
+/// default 0 (off).
+///
+/// `SLEEP_VDDSDIO_PD=1`: power down the flash supply (VDD_SDIO) in light sleep.
+/// ESP-IDF waits ~60µs for the flash after such a wake, from IRAM; this code
+/// resumes in flash-resident code with no such wait, so it may crash on wake
+/// (check the reset cause in telemetry).
+pub const SLEEP_VDDSDIO_PD: bool = parse_u32(option_env!("SLEEP_VDDSDIO_PD"), 0) != 0;
+/// `SLEEP_RTC_PERI_PD=1`: power down the RTC peripheral domain in light sleep.
+/// `Ext0WakeupSource` needs that domain, so the GPIO2 wake button becomes a
+/// digital GPIO wake instead. Watch the battery reading in telemetry: the
+/// SAR ADC and RTC IO mux live in this domain.
+pub const SLEEP_RTC_PERI_PD: bool = parse_u32(option_env!("SLEEP_RTC_PERI_PD"), 0) != 0;
+
 /// `option_env!` value as a number, or `default` if unset (build-time knobs
 /// such as `FETCH_GAP_S`). Fails the build on
 /// anything but ASCII digits.
@@ -98,15 +112,15 @@ mod inner {
     use core::time::Duration;
 
     use esp_hal::clock::Clocks;
-    use esp_hal::gpio::RtcPinWithResistors;
+    use esp_hal::gpio::{Input, InputConfig, Pull, RtcPinWithResistors, WakeEvent};
     use esp_hal::peripherals::{GPIO2, LPWR, RTC_IO, SYSTIMER, TIMG1};
     use esp_hal::rtc_cntl::Rtc;
     use esp_hal::rtc_cntl::sleep::{
-        Ext0WakeupSource, RtcSleepConfig, TimerWakeupSource, WakeupLevel,
+        Ext0WakeupSource, GpioWakeupSource, RtcSleepConfig, TimerWakeupSource, WakeupLevel,
     };
     use esp_hal::time::Instant;
 
-    use super::RADIO_ACTIVE;
+    use super::{RADIO_ACTIVE, SLEEP_RTC_PERI_PD, SLEEP_VDDSDIO_PD};
 
     /// Longest single nap, used when no task deadline is armed.
     const MAX_NAP_US: u64 = 1_000_000;
@@ -123,7 +137,10 @@ mod inner {
 
     /// `SLP_WAKEUP_CAUSE` bits (esp-hal's `WakeupReason`).
     const WAKEUP_CAUSE_EXT0: u32 = 1 << 0;
+    const WAKEUP_CAUSE_GPIO: u32 = 1 << 2;
     const WAKEUP_CAUSE_TIMER: u32 = 1 << 3;
+    /// Either wake button cause (ext0, or GPIO with `SLEEP_RTC_PERI_PD`).
+    const WAKEUP_CAUSE_BUTTON: u32 = WAKEUP_CAUSE_EXT0 | WAKEUP_CAUSE_GPIO;
     /// SYSTIMER counts at a fixed 16 MHz on the S3 (XTAL / 2.5).
     const SYSTIMER_TICKS_PER_US: u64 = 16;
     /// RTC GPIO number of the GPIO2 wake button (same as the GPIO number on S3).
@@ -140,7 +157,7 @@ mod inner {
     struct State {
         rtc: Rtc<'static>,
         sleep_cfg: RtcSleepConfig,
-        wake_button: Ext0WakeupSource<GPIO2<'static>>,
+        wake_button: WakeButton,
         /// No sleep until `Instant::now()` passes this (boot grace / button window).
         awake_until_us: u64,
         /// Whether the CPU is in a sleeping stretch, to log only transitions.
@@ -158,6 +175,13 @@ mod inner {
         cal_anchor: Option<(u64, u64)>,
         cal_last_sys: u64,
         stats: SleepStats,
+    }
+
+    /// The GPIO2 escape-hatch wake: RTC ext0, or a digital GPIO wake when the
+    /// RTC peripheral domain is powered down (`SLEEP_RTC_PERI_PD`).
+    enum WakeButton {
+        Ext0(Ext0WakeupSource<GPIO2<'static>>),
+        Gpio(Input<'static>, GpioWakeupSource),
     }
 
     /// Accumulated over one sleeping stretch, printed (and reset) when it ends.
@@ -209,8 +233,17 @@ mod inner {
         // the RTC-domain pull-up (the boot-time `Pull::Up` doesn't carry over),
         // so the pin floats and can read as pressed — seen on hardware as a
         // spurious ext0 wake on the very first nap.
-        wake_button.rtcio_pullup(true);
-        let wake_button = Ext0WakeupSource::new(wake_button, WakeupLevel::Low);
+        let wake_button = if SLEEP_RTC_PERI_PD {
+            // The digital pad's pull-up stays on in light sleep.
+            let mut input = Input::new(wake_button, InputConfig::default().with_pull(Pull::Up));
+            input
+                .wakeup_enable(true, WakeEvent::LowLevel)
+                .expect("GPIO2 light-sleep wake");
+            WakeButton::Gpio(input, GpioWakeupSource::new())
+        } else {
+            wake_button.rtcio_pullup(true);
+            WakeButton::Ext0(Ext0WakeupSource::new(wake_button, WakeupLevel::Low))
+        };
         critical_section::with(|_| {
             // SAFETY: interrupts disabled; no other accessor can exist.
             unsafe {
@@ -247,6 +280,8 @@ mod inner {
         cfg.set_pd_cur_slp(true);
         cfg.set_bias_sleep_monitor(true);
         cfg.set_pd_cur_monitor(true);
+        cfg.set_vddsdio_pd_en(SLEEP_VDDSDIO_PD);
+        cfg.set_rtc_peri_pd_en(SLEEP_RTC_PERI_PD);
         cfg
     }
 
@@ -292,9 +327,9 @@ mod inner {
                     );
                 }
                 let cause = sleep_compensated(state, nap_us);
-                if cause & WAKEUP_CAUSE_EXT0 != 0 && !wake_button_low() {
+                if cause & WAKEUP_CAUSE_BUTTON != 0 && !wake_button_low(state) {
                     state.stats.spurious_ext0 += 1;
-                } else if cause & WAKEUP_CAUSE_EXT0 != 0 {
+                } else if cause & WAKEUP_CAUSE_BUTTON != 0 {
                     state.awake_until_us = now_us() + BUTTON_AWAKE_WINDOW.as_micros() as u64;
                     end_sleeping(state, "GPIO2 press");
                 }
@@ -364,8 +399,13 @@ mod inner {
     }
 
     /// Whether the GPIO2 wake button currently reads pressed (active low).
-    fn wake_button_low() -> bool {
-        RTC_IO::regs().rtc_gpio_in().read().next().bits() & (1 << WAKE_BUTTON_RTC_GPIO) == 0
+    fn wake_button_low(state: &State) -> bool {
+        match &state.wake_button {
+            WakeButton::Ext0(_) => {
+                RTC_IO::regs().rtc_gpio_in().read().next().bits() & (1 << WAKE_BUTTON_RTC_GPIO) == 0
+            }
+            WakeButton::Gpio(input, _) => input.is_low(),
+        }
     }
 
     /// Updates `rtc_scale_ppm` from how far the RTC slow clock and SYSTIMER
@@ -458,16 +498,17 @@ mod inner {
         let timer = TimerWakeupSource::new(Duration::from_micros(nominal_us));
         // The wake alarm is set relative to an RTC read inside `sleep_light`.
         latch_rtc_time();
-        state
-            .rtc
-            .sleep(&state.sleep_cfg, &[&timer, &state.wake_button]);
+        match &state.wake_button {
+            WakeButton::Ext0(ext0) => state.rtc.sleep(&state.sleep_cfg, &[&timer, ext0]),
+            WakeButton::Gpio(_, gpio) => state.rtc.sleep(&state.sleep_cfg, &[&timer, gpio]),
+        }
 
         let cause = LPWR::regs().slp_wakeup_cause().read().wakeup_cause().bits();
         latch_rtc_time();
         let rtc_us = (state.rtc.time_since_boot() - rtc_before).as_micros();
         let sys_us = (systimer_count() - sys_before) / SYSTIMER_TICKS_PER_US;
 
-        let timer_only = cause & WAKEUP_CAUSE_TIMER != 0 && cause & WAKEUP_CAUSE_EXT0 == 0;
+        let timer_only = cause & WAKEUP_CAUSE_TIMER != 0 && cause & WAKEUP_CAUSE_BUTTON == 0;
         // `nap_us` is time spent asleep, which neither counter saw at all; the
         // RTC fallback spans the whole bracket, so drop the part SYSTIMER saw.
         let slept_us = if timer_only {

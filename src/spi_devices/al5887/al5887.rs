@@ -118,6 +118,14 @@ impl<'d> Al5887<'d> {
         Ok(())
     }
 
+    /// Chip-disables, then pulls LED_EN low: hardware shutdown, which also
+    /// resets the registers. `init_driver` brings it back.
+    pub async fn shutdown(&mut self) -> Result<(), Al5887Error> {
+        self.set_chip_enable(false).await?;
+        self.led_en.set_low();
+        Ok(())
+    }
+
     pub async fn set_led_brightness_color(
         &mut self,
         led: Led,

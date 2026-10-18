@@ -90,6 +90,9 @@ async fn main(spawner: Spawner) -> ! {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let peripherals = esp_hal::init(config);
+    if bay_wheels_controller::deep_sleep_test::DEEP_SLEEP_TEST > 0 {
+        bay_wheels_controller::deep_sleep_test::run(peripherals);
+    }
     bay_wheels_controller::watchdog::report_last_reset();
 
     // Setup heap allocator

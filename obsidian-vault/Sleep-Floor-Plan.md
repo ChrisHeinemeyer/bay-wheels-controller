@@ -70,6 +70,51 @@ Powering down the modem domain too saved only ~0.1mA (round 1).
      to a source that doesn't need the RTC peripheral domain.
    - CPU power-down in light sleep (if esp-hal supports retention on the S3).
 
+#### Step 1 prepared (2026-10-18, branch `worktree-sleep-floor-step1`)
+
+**Finding while preparing:** the AL5887 is never chip-disabled after boot
+until the first touch-and-release. The input task's first reading is
+`StationIdx::None`, which equals the LED task's starting `last_station`, so the
+idle branch (`set_chip_enable(false)`) never runs. Every PPK2 floor so far
+(nobody touches the board) had the driver in active mode with all LEDs off.
+This may be a large part of the "board" 1.8mA.
+
+Build knobs (env vars at build time, all default to today's behaviour):
+
+| Knob | Values | Where |
+|---|---|---|
+| `DEEP_SLEEP_TEST` | 1: board pins at idle levels, held, then deep sleep (AL5887 standby). 2: same, with LED_EN low (AL5887 shutdown) | `src/deep_sleep_test.rs` |
+| `LED_IDLE` | 1: chip-disable from boot too (the fix). 2: also LED_EN low while idle (hardware shutdown, re-init on touch) | `src/tasks/station_leds.rs` |
+| `SLEEP_VDDSDIO_PD` | 1: flash supply off in light sleep. No IRAM flash-ready wait on wake, so it may crash; check the reset cause | `src/power.rs` |
+| `SLEEP_RTC_PERI_PD` | 1: RTC peripherals off in light sleep; GPIO2 wake becomes a digital GPIO wake. Check that the battery mV still reads correctly | `src/power.rs` |
+
+`tools/ppk2/build-step1.sh [name...]` builds every variant to
+`target/step1/<name>.elf` (`--features use-env,log-server,gbfs-mirror,sleep-trace`).
+Run order, one PPK2 run each (a few minutes; read the floor between fetches):
+
+1. `baseline`: today's firmware, reference floor.
+2. `led-idle-1`: AL5887 chip-disabled from boot. Delta = the boot-idle bug.
+3. `led-idle-2`: AL5887 in hardware shutdown. Delta vs 2 = standby vs shutdown.
+4. `deep-al5887-standby`: board alone (ESP32 ~10µA) with the AL5887 in
+   standby, i.e. the same board state as run 2. Floor(2) − this = ESP32 share.
+5. `deep-al5887-shutdown`: board alone with the AL5887 shut down. Whatever is
+   left is the regulator, dividers, pull-ups and leakage, the input to step 2.
+6. `vddsdio-pd` and `rtc-peri-pd`: each on top of `LED_IDLE=1`, so compare
+   with run 2.
+
+Deep-sleep builds stay awake 20s after reset (attach/flash window), then sleep
+until a GPIO2 press, which boots into the same window again. Pad holds survive
+a deep-sleep wake but not a power cycle. A fresh `measure` power-cycles.
+
+Dropped from step 1: **CPU power-down**. esp-hal 1.0 (ours) and the latest
+release, 1.2.0, have no CPU retention. `main` gained it after 1.2.0 (#6288,
+2026-09-30, S3 backend using the retention DMA, ~8.8KB buffer via
+`LowPower::install_cpu_retention_memory`). Using it means moving to an
+unreleased esp-hal with the new `LowPower` sleep API and matching
+esp-rtos/esp-radio (our esp-rtos patch included). 1.2 also brings automatic
+light sleep for the S3, which could replace much of `power.rs`. ESP-IDF quotes
+~650µA saved on the C3; there is no S3 figure. Worth its own step after 1-2.
+
 ### Step 2: board level (needs the schematic / part numbers)
 
 - Regulator: its quiescent current may be most of the 1.8mA. Options: a

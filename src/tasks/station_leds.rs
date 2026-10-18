@@ -30,6 +30,11 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
         .await
         .unwrap();
     crate::dprintln!("Ready to go!");
+    // No touch yet, so the loop below sees no change from `StationIdx::None`
+    // and never reaches its idle branch until a touch and release.
+    if LED_IDLE >= 1 {
+        go_idle(&mut al5887).await;
+    }
     loop {
         let station = STATION_SIGNAL.wait().await;
         if let Some(t) = FETCH_SIGNAL.try_take() {
@@ -54,12 +59,11 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
                     .set_all_leds_brightness_color(0, Color::new(0, 0, 0))
                     .await
                     .unwrap();
-                // Chip-disable (rather than relying on the zeroed registers alone) both blanks
-                // the display and cuts the driver's own quiescent draw during idle — see
-                // Power-Management.md#Not yet done item 3.
-                al5887.set_chip_enable(false).await.unwrap();
+                go_idle(&mut al5887).await;
             } else {
-                if was_idle {
+                if was_idle && LED_IDLE >= 2 {
+                    al5887.init_driver().await.unwrap();
+                } else if was_idle {
                     al5887.set_chip_enable(true).await.unwrap();
                 }
                 let mut leds = get_leds(station, &station_data);
@@ -78,6 +82,27 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
             }
         }
         Timer::after(Duration::from_millis(50)).await;
+    }
+}
+
+/// What the AL5887 does while no station is touched, from the `LED_IDLE`
+/// build env var (default 0). Sleep-Floor-Plan.md step 1 measures each.
+/// - 0: chip-disabled on touch release, but left enabled (active, all LEDs
+///   off) from boot until the first touch.
+/// - 1: also chip-disabled from boot.
+/// - 2: as 1, plus LED_EN low (hardware shutdown); re-initialised on the next
+///   touch.
+const LED_IDLE: u32 = crate::power::parse_u32(option_env!("LED_IDLE"), 0);
+
+/// Blanks the display with no station selected.
+async fn go_idle(al5887: &mut Al5887<'static>) {
+    // Chip-disable (rather than relying on the zeroed registers alone) both blanks
+    // the display and cuts the driver's own quiescent draw during idle — see
+    // Power-Management.md#Not yet done item 3.
+    if LED_IDLE >= 2 {
+        al5887.shutdown().await.unwrap();
+    } else {
+        al5887.set_chip_enable(false).await.unwrap();
     }
 }
 
