@@ -185,13 +185,22 @@ fresh cells can settle the current.
 
 ## Optimization rounds (2026-10-17)
 
-PPK2 experiments took the average from ~20mA to **9.6-12mA** at the 120s
-gap: light-sleep config level 2 (asleep 11.9 → 4.4mA), a LAN GBFS mirror on
-the HA add-on (fetch 4.1s → ~50ms), DHCP lease reuse, and smoltcp ARP/DHCP
-patches. An AP-side loss of unicast for 1-3s after re-association is still
-unsolved. Awake time (~5.1mA) is now the biggest part. Full record:
+PPK2 experiments (2026-10-17/18, shipped in v1.4.0) took the average from
+~20mA to **~4.6-6.6mA** at the 120s gap (4.62mA measured in a clean gateway
+phase):
+
+- ESP-IDF light-sleep config: asleep 11.9 → 4.4mA.
+- LAN GBFS mirror on the HA add-on: fetch 4.1s → ~15-50ms.
+- DHCP lease reuse and smoltcp DHCP/ARP patches.
+- Fixing the idle hook's TIMG1 tick rate (each timer took ~4 naps): ~11.4 →
+  ~6.7mA. Then no 2ms early-wake margin (wakes ~2.5 → ~1.2ms): → 4.6mA in a
+  clean phase. Plus the LED task waking only on changes.
+
+What's left: the sleep floor (~4.1mA, board + chip, ~90% of the total) and the Xfinity XB8
+gateway ignoring the board's replies for 1-3s after each reconnect (~2mA in
+its bad phases; needs a different access point, not firmware). Full record:
 [[Power-Optimization-Log]]. The section below predates this work; its sleep
-config experiment is done (`SLEEP_CFG`, default 2).
+config experiment is done.
 
 ## Next: reduce sleep current (biggest lever)
 

@@ -15,9 +15,9 @@ Added 2026-10-12 after the board needed power-cycling every few hours (touches d
 
 ## Telemetry (`log-server` feature, `src/tasks/telemetry.rs`)
 
-Each fetch cycle POSTs a JSON report to `LOG_SERVER` from `.env`, after the fetch and before teardown, so it adds no wakeups. It uses plain HTTP/1.1 straight over the fetch task's `TcpClient` socket: no DNS, no reqwless, 5s timeout, failures ignored. Fields: board, fw, boot count, uptime, battery % and ADC mV, RSSI, TX power, fetch ok and totals, data age, per-cycle connect/DHCP/fetch ms, previous cycle's total radio-on ms, light-sleep totals, free heap, and the reset summary (until it has been delivered once).
+Each fetch cycle POSTs a JSON report to `LOG_SERVER` from `.env`, after the fetch and before teardown, so it adds no wakeups. It uses plain HTTP/1.1 straight over the fetch task's `TcpClient` socket: no DNS, no reqwless, 5s timeout, failures ignored. Fields: board, fw, boot count, uptime, battery % and ADC mV, RSSI, TX power, fetch ok and totals, data age, per-cycle connect/DHCP/fetch ms, previous cycle's total radio-on ms, light-sleep totals, free heap, and the reset summary (until it has been delivered once). Since v1.4.0 also the fetch sub-phases (`handshake_ms`, `ttfb_ms`, `body_ms`, `parse_ms`, `body_bytes`), `src` (mirror/lyft), `lease` (reused/dhcp) and `lease_s`; with `sleep-trace`, per-task embassy polls while asleep.
 
-The receiver is a Home Assistant local add-on in `homeassistant/` (deployed to HA OS `/local_apps` via `homeassistant/deploy.sh`), status page at `http://10.0.0.107:8099/`.
+The receiver is a Home Assistant local add-on in `homeassistant/` (deployed to HA OS `/local_apps` via `homeassistant/deploy.sh`), status page at `http://10.0.0.107:8099/`. Since add-on 1.1.0 it also serves the GBFS mirror (`GET /gbfs/station_status.json`, see [[Task-Fetch]]). The repo has 1.1.2; HA runs 1.1.1, which still has a diagnostic UDP echo on 8099/udp that nothing uses any more.
 
 ## Stack budget
 

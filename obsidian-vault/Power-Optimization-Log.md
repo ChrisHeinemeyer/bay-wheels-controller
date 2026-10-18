@@ -24,9 +24,15 @@ it did, and what stayed.
 - **Flashing:** USB VBUS powers the board, so each flash is: PPK2 off, plug
   USB, flash within the 20s no-sleep boot window, unplug, PPK2 on. Once the
   board light-sleeps, its USB-JTAG enumerates but doesn't answer.
-- Build-time knobs (`option_env!`, read by `power::parse_u32`): `SLEEP_CFG`,
-  `MIN_NAP_US`, `FETCH_GAP_S`, `DHCP_DISCOVER_MS`, `DHCP_REUSE`, `GARP`,
-  `TX_POWER_FIXED`, sweeps `SLEEP_SWEEP_S`/`NAP_SWEEP_S`.
+- Build-time knobs (`option_env!`, read by `power::parse_u32`) were added
+  for the experiments: `SLEEP_CFG`, `MIN_NAP_US`, `DHCP_DISCOVER_MS`,
+  `DHCP_REUSE`, `GARP`, `TX_POWER_FIXED`, `AMPDU_RX`, `PMF`, sweeps
+  `SLEEP_SWEEP_S`/`NAP_SWEEP_S`. v1.4.0 removed them all (the chosen values
+  are constants now) except `FETCH_GAP_S` (seconds between fetches, default
+  120; shorter cycles while testing).
+- Ad-hoc analysis that isn't in the repo: per-task attribution (telemetry
+  `task_polls_total` × PPK2 charge per wake) and the sniffer analysis below
+  (`tshark` filters on the board's MAC).
 
 ## Results by round
 
@@ -50,34 +56,64 @@ it did, and what stayed.
 | 16 | Doze-and-probe: modem sleep during the dead period, probe every 100ms | Dead period ~205mA instead of ~230. Power save barely engages. |
 | 17 | Same, probe every 500ms | ~167mA average during the dead period, plus up to 500ms latency. Not worth it. |
 
-## The post-association unicast loss (unsolved)
+## The post-association unicast loss: the Xfinity XB8 gateway
 
 After every fast re-association (~107ms connect), unicast frames **toward**
 the board are lost for 1-3s while the uplink and received broadcasts already
-work. What's known:
+work. It comes in phases (runs of clean cycles, then runs of bad ones) and is
+worse when the board was off the air for less time (15s gap: ~2.7s every
+cycle; 120s gap: ~1.1-2.3s, or none; boot after minutes unpowered: none).
+Cost: **~2mA** of average current in a bad phase at the 120s gap.
 
-- It comes in phases: runs of clean cycles, then runs of bad ones. It is
-  worse when the board was off the air for less time (15s gap: ~2.7s every
-  cycle; 120s gap: ~1.1-2.3s, or none; boot after minutes unpowered: none).
-- Not changed by: ARP (cache, retry timing, gratuitous ARP alone), A-MPDU RX,
-  deauth timing, skipping the deauth.
-- So it's in the AP or in the closed ESP WiFi blob. Untested: the router's
-  model/WiFi security mode, WPA3/SAE, PMKSA caching and 802.11r (`ft_enabled`)
-  in the station config.
-- Cost: ~2.3mA of average current in a bad phase at the 120s gap.
+Firmware changes that didn't help: ARP (cache, retry timing, gratuitous
+ARP), A-MPDU RX off (rounds 11, 28), a teardown wait (13), no deauth (15),
+doze-and-probe (16-17), PMF off (27; had no effect at all: the ESP-IDF
+driver ignores `pmf_cfg.capable` and always advertises PMF when the AP does).
 
-## What stayed
+**Sniffer captures (2026-10-18)** with macOS Wireless Diagnostics on the
+2.4GHz channel (1, 20MHz) of the gateway, an **Xfinity XB8 (Technicolor,
+v2.3)** running WPA2/WPA3 mixed mode, BSSID `72:13:01:06:21:cd`; board
+`ac:27:6e:ae:e7:04`:
 
-- `SLEEP_CFG=2` and `DHCP_DISCOVER_MS=250` are now the defaults.
+- With A-MPDU on: thousands of Block Ack Requests from the gateway (572 in
+  one 3s gap, ~150 per 100ms in bursts). The board answers every one with a
+  Block Ack, but the gateway keeps asking and sends almost no data.
+- With A-MPDU off (round 28): the storms are gone but the gap isn't. The
+  gateway's QoS Null frames to the board go out ~7 times each. Then, every
+  ~50ms, the gateway sends the board an RTS, **the board answers CTS within
+  microseconds** (seen by the sniffer), and the gateway sends another RTS
+  instead of its data, 7 times, then gives up. The gateway ACKs the board's
+  uplink throughout. After ~2.8s it starts accepting the board's replies.
+- The Block Ack setup (ADDBA) is a protected action frame under PMF and is
+  retried 5-7 times each way at the start of every connection.
+
+**Conclusion:** the board answers correctly; **the gateway ignores its
+ACK/CTS replies for 1-3s after each re-association**. Probably per-station
+state the gateway keeps after a station leaves; clean phases are when it has
+dropped that state. Not fixable in firmware. Fixes on the network side: a
+separate plain (WiFi 4/5) access point for the board, or a router of one's own
+with the XB8 in bridge mode. The XB8's admin page doesn't appear to offer an
+802.11 mode or WPA2-only setting for 2.4GHz.
+
+## What stayed (v1.4.0)
+
+- Light-sleep config: ESP-IDF's light-sleep values (8M and XTAL off,
+  digital rail dropped). Asleep 11.9 → 4.4mA.
+- **TIMG1 divider fix** in the idle hook (round 26), and **no early-wake
+  margin**: naps run to the deadline, tasks may run up to the wake-up
+  latency late.
+- Input task signals the LED task only on a change.
 - `gbfs-mirror` feature + add-on mirror (falls back to Lyft on any failure).
-- DHCP lease reuse (`DHCP_REUSE`, default on).
+- DHCP lease reuse until 90% of T1; DHCP DISCOVER retry 250ms.
+- Mirror connect retry every 250ms.
 - Patched smoltcp (`patches/smoltcp-0.12.0`, all changes marked `PATCHED`):
   DHCP xid kept across DISCOVER retries; lease/T1 exposed; ARP cache 1h and
   kept across same-address reconfigs; 200ms ARP retries (cache and
-  per-socket); `ANNOUNCE_ARP` for the gratuitous ARP.
-- Mirror connect retry every 250ms; gratuitous ARP after connect (`GARP`).
-- Removed after testing: frame counters, UDP probe/echo (firmware and add-on),
-  A-MPDU/teardown/deauth knobs, doze-and-probe.
+  per-socket).
+- `sleep-trace` telemetry: per-task embassy polls while asleep.
+- Removed after testing: frame counters, UDP probe/echo (firmware and add-on
+  1.1.2), gratuitous ARP, WiFi de-init, A-MPDU/PMF/teardown/deauth knobs,
+  doze-and-probe, esp-rtos timer/alarm counters, all sweep knobs.
 
 ## Where the current goes now (round 14, 120s gap)
 
@@ -136,19 +172,43 @@ ending in a spurious "early" alarm and a 2ms near-deadline wait.
 
 Per-task split: telemetry poll counts (`task_polls_total`) times the PPK2's
 measured charge per wake; the bursts can't be told apart by period alone
-because 500ms, 2s and 30s timers line up. Each wake is ~2.5ms at ~46mA,
-mostly the idle hook's 2ms `WAKE_MARGIN_US`.
+because 500ms, 2s and 30s timers line up. Each wake was ~2.5ms at ~46mA,
+mostly the idle hook's 2ms early-wake margin (removed in v1.4.0).
 
-**Next options:** the AP dead gap (router settings/security mode); the sleep
-floor (deep sleep between fetches, more power domains off); a smaller wake
-margin (~0.15mA).
-
-**Lessons:**
-- The leftover ~11 wakes/s are not the WiFi blob's ets timers; something
-  else sets the alarm. Round 20 counts which esp-rtos thread sleeps with a
-  timeout.
+**Lessons from rounds 18-26:**
+- The ~11 non-embassy wakes/s were not the WiFi blob's timers or threads:
+  they were the idle hook's own TIMG1 tick-rate bug chopping each timer into
+  ~4 naps.
 - Re-initialising the radio costs ~1.8s of extra radio time per cycle (PHY
   calibration and full authentication). It could only pay off at much longer
   fetch gaps.
 - Before ever dropping the WiFi driver again, stop embassy-net from
   transmitting into it (clear the IP config and drain RX), or it crashes.
+
+## v1.4.0 (cleaned-up build, 120s gap)
+
+Measured 2026-10-18 on the release candidate (`use-env,log-server,gbfs-mirror,sleep-trace`),
+385s, all cycles in a clean gateway phase:
+
+| Part | Average | Notes |
+|---|---|---|
+| Sleep floor (board + chip) | **4.16mA** | ~90% of the total now |
+| Fetch cycle | 0.35mA | ~190-200ms of radio per cycle at ~230mA |
+| Input poll (500ms) | 0.07mA | 2 wakes/s, ~1.2ms and ~34mA·ms each (was ~2.5ms, ~140mA·ms with the 2ms margin) |
+| Serial status, battery, other | ~0 | they share wakes with the input poll |
+| **Total** | **4.62mA** | |
+
+Awake 0.2% of the time. In a bad XB8 phase the dead gap adds ~2mA, so the
+real-world average is **~4.6-6.6mA**: about 13-19 days on 3×AA (2,100mAh),
+against ~4.4 days on v1.3.1.
+
+**Gateway refusing the board (2026-10-18 ~10:00):** after a morning of
+hundreds of reconnects every ~18s, the XB8 refused to associate the board for
+~20 minutes. Identical, previously working firmware also failed; it finally
+connected after 145s of retries (`connect_ms` 145277). `wifi_connect::connect`
+keeps the radio on for up to ~500s while retrying, so a refusal like that
+costs ~200mA for its duration.
+
+**Next options:** a separate access point for the board (removes the XB8's
+~2mA dead gap); the sleep floor (deep sleep between fetches, more power
+domains off).

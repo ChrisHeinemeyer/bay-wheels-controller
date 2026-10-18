@@ -7,13 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-18
+
+Average current at the 120s fetch gap went from ~20mA to ~4.6-6.6mA (PPK2 at
+4.5V; the range is the Xfinity XB8 issue below). That is about 13-19 days on
+3×AA instead of ~4.4.
+
+### Added
+
+- `gbfs-mirror` feature: fetch station data from the Home Assistant add-on at
+  `GBFS_MIRROR` over plain HTTP, only this board's stations and fields (~4KB
+  instead of ~270KB, ~15-50ms instead of ~4s). Falls back to Lyft on any
+  failure. The add-on (1.1.0+) keeps the copy fresh from Lyft every 30s.
+- The DHCP lease is reused across fetch cycles until 90% of its renewal time,
+  so most cycles skip DHCP.
+- Status reports include the fetch phases (`handshake_ms`, `ttfb_ms`,
+  `body_ms`, `parse_ms`, `body_bytes`), the source (mirror/lyft) and whether
+  the lease was reused. `sleep-trace` builds also report per-task wakes while
+  asleep.
+- `tools/ppk2/`: a uv script to power and measure the board with a Nordic
+  PPK2.
+- `FETCH_GAP_S` build-time setting for the gap between fetches (default 120s).
+
 ### Changed
 
+- Light sleep uses ESP-IDF's light-sleep power settings: 11.9mA → 4.4mA while
+  asleep.
+- smoltcp is vendored with fixes: DHCP DISCOVER retries keep their
+  transaction ID and retry after 250ms, the ARP cache survives reconnects,
+  and ARP retries after 200ms instead of 1s.
+- The mirror connection is retried every 250ms after WiFi connects.
+- The touch input task wakes the LED task only when the selection changes.
+- Light-sleep naps run up to the next deadline instead of ending 2ms early.
+  Tasks can run up to the wake-up latency late, and each wake is ~1.2ms
+  instead of ~2.5ms.
 - Battery percentage uses a discharge curve measured on the board. 0% is now 3.33V for the
   pack (1.11V/cell), where the board stops working. Before, 0% was 2.70V, and the board
   showed 25% when it stopped.
 - The battery is not read while the radio is on. Readings during a WiFi transmission were
   about 10 points too low.
+
+### Fixed
+
+- The light-sleep idle hook read the wakeup timer's tick rate as twice the
+  real rate. Every timer took ~4 naps and as many spurious early wakeups.
+  Fixing it cut the average current from ~11.4mA to ~6.7mA.
+
+### Known issues
+
+- With an Xfinity XB8 gateway, the gateway ignores the board's replies for
+  1-3s after many reconnects (seen in a WiFi capture), which costs ~2mA. A
+  different access point avoids it.
+- After very many reconnects in a short time, the XB8 refused the board for
+  ~20 minutes. The firmware keeps retrying with the radio on (up to ~500s per
+  attempt) and recovers on its own.
 
 ## [1.3.1] - 2026-10-13
 
@@ -220,7 +267,8 @@ Initial firmware bring-up.
 - Switched target chip from ESP32-C6 to ESP32-S3.
 - Replaced heap-allocated `alloc::vec::Vec` with `heapless::Vec`.
 
-[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.0...v1.2.1

@@ -18,6 +18,31 @@ completely stopped, not merely modem-sleeping. `wifi_connect_task` no longer exi
 as a separate task — [[Task-Wifi-Connect]] is now just `setup()`/`connect()` helper
 functions this task calls directly.
 
+## v1.4.0: LAN mirror and lease reuse
+
+- **`gbfs-mirror` feature** (`src/tasks/mirror.rs`): fetch from the Home
+  Assistant add-on at `GBFS_MIRROR` (from `.env`) over plain HTTP instead of
+  Lyft over TLS. The board asks for its own stations
+  (`/gbfs/station_status.json?fields=...&ids=...`, built once from
+  `BOARD_STATION_MAP` + `TARGET_STATIONS`), so the response is ~4KB instead of
+  ~270KB and the fetch takes ~15-50ms instead of ~4s. The add-on refreshes its
+  copy from Lyft every 30s and answers 503 when it's over 5 minutes old. Any
+  mirror failure (5s timeout) falls back to the Lyft fetch in the same cycle.
+  The TCP connect to the mirror retries every 250ms, since the first SYNs
+  after association are often lost (see [[Power-Optimization-Log]]).
+- **DHCP lease reuse**: after a DHCP success the lease is applied as a static
+  config on later cycles until 90% of T1 (lease length and T1 come from the
+  patched smoltcp, see [[Networking]]). Any failure clears it.
+- Telemetry per cycle: `handshake_ms`, `ttfb_ms`, `body_ms`, `parse_ms`,
+  `body_bytes`, `src` (mirror/lyft), `lease` (reused/dhcp), `lease_s`.
+- `FETCH_GAP_S` (build-time env, default 120) sets the gap after a
+  successful cycle; useful for faster iteration on the bench.
+
+Typical cycle with a clean association: connect ~107ms, mirror fetch
+~15-50ms, telemetry + teardown ~0.1s, ~0.2s radio on in total. On the Xfinity
+XB8 many cycles add a 1-3s dead gap after association that the gateway
+causes ([[Power-Optimization-Log#The post-association unicast loss: the Xfinity XB8 gateway]]).
+
 ## Structure: one loop, full cycle every time
 
 ```

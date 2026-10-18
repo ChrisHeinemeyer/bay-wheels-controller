@@ -24,9 +24,21 @@ obsidian-vault/        ← this vault (not yet committed/gitignored as of when t
 
 - **`light-sleep`** (default since v1.3.1): light-sleeps the CPU between tasks while the radio is off ([[Power-Management]]). USB-Serial-JTAG is down while asleep, so probe-rs/espflash only attach in the first 20s after reset or for 30s after a GPIO2 press. Opt out with `--no-default-features`.
 - **`log-server`**: POSTs a JSON status report to `LOG_SERVER` (from `.env`) once per fetch cycle. See [[Telemetry-and-Recovery]].
-- **`sleep-trace`**: diagnostic. Implies `light-sleep` and counts embassy task polls while asleep.
+- **`sleep-trace`**: diagnostic. Implies `light-sleep` and counts embassy task polls while asleep; with `log-server` they go out as `executor_wakes_total` / `task_polls_total` (task order: 0 main, 1 net, 2 battery, 3 LEDs, 4 fetch, 5 input, 6 serial).
+- **`gbfs-mirror`** (v1.4.0): fetch station data from the Home Assistant add-on at `GBFS_MIRROR` (from `.env`) instead of Lyft. See [[Task-Fetch#v1.4.0: LAN mirror and lease reuse]]. Needs `.env`, so release builds don't include it.
 
-The default build is NVS credentials + RTT logging + `serial_status_task` + light sleep. That is also what `release.yml` ships. Typical dev build: `cargo run --release --features use-env,log-server`.
+The default build is NVS credentials + RTT logging + `serial_status_task` + light sleep. That is also what `release.yml` ships. Typical dev build: `cargo run --release --features use-env,log-server,gbfs-mirror`.
+
+Build-time env: `FETCH_GAP_S` (seconds between successful fetch cycles, default 120). All other power-experiment knobs were removed in v1.4.0.
+
+## Vendored patches (`patches/`, via `[patch.crates-io]`)
+
+- `esp-rtos-0.2.0`: the timer-delete leak backport (see [[Telemetry-and-Recovery]]). Drop on esp-rtos >= 0.3.0.
+- `smoltcp-0.12.0`: DHCP xid reuse, lease/T1 export, ARP cache and timing changes (see [[Networking#Patched smoltcp (`patches/smoltcp-0.12.0`, v1.4.0)]]).
+
+## Power measurement (`tools/ppk2/`)
+
+`tools/ppk2/ppk2.py` is a uv script for a Nordic PPK2 in source-meter mode (4.5V in place of the AA pack): `on`, `off`, `cycle`, `measure -s N --csv --json --progress` (the CSV of 1ms bins is appended every 10s, so a stopped run still leaves its data), and `windows` to summarize a CSV per fixed window. `flash.sh` assumes the board is powered only by the PPK2; with USB VBUS powering the board, flash over USB inside the 20s boot window instead. Run summaries are kept in `tools/ppk2/runs/`.
 
 ## Profiles
 
