@@ -109,7 +109,39 @@ order: 0 main, 1 net, 2 battery, 3 LEDs, 4 fetch, 5 input, 6 serial.
 | 18 | Wake-source telemetry | Steady state ~18 nap wakes/s, ~7/s from embassy tasks: LEDs ~4.4/s, input ~2.2/s, serial ~0.5/s. The input task signalled the LED task every 500ms poll even with no change, and each signal cost two LED wakes. |
 | 19 | **LED fix** (signal only on change) + **WiFi de-init between cycles** (drop the `WifiController`, re-create it with `esp_radio::wifi::new` from the leaked radio init) | Crash-looped: embassy-net answered a frame left in the RX queue after the drop, and `esp_wifi_internal_tx` jumped into the de-initialised driver (LoadProhibited, PC 0x10). |
 | 19b | Same, clearing the IPv4 config and draining RX for 50ms before the drop | Stable, heap steady at 56.8KB after teardown. LED task no longer polled while asleep; embassy wakes ~2.7/s. **Zero radio timer callbacks while asleep**, yet still **~14 nap wakes/s**. Every cycle cold-starts the radio: connect ~1.9s (was ~0.1s), radio on ~4s per cycle. **13.9mA, worse** than round 14 (9.6-11.9mA). De-init removed. |
-| 20 | Count timed sleeps per esp-rtos thread (entry function address) | Running. |
+| 20 | Count timed sleeps per esp-rtos thread (entry function address) | Only esp-rtos's radio `timer_task`, once per stretch. Not the wakers. |
+| 21 | Count RTOS alarms by what they were armed for | All ~35/s for the embassy timer queue, yet only ~7/s embassy executor wakes. |
+| 22 | Count early vs processed embassy alarms | **Every nap ended in one early alarm** (2,629 of 2,629); 698 real. 48min: **11.46mA**, awake 7.3% (LED fix alone: 5.1 → 3.4mA). |
+| 23 | Keep TIMG1 in lockstep with SYSTIMER after each nap | No change. Neither counter moves by itself in sleep, so not drift. |
+| 24 | Sample TIMG1's interrupt flag around each nap | Never raised there. |
+| 25 | Histogram of how early | 5-50ms and 50ms+, far more than the 2ms wake margin. 48min: 11.44mA. |
+| 26 | **Fix `timg1_t0_ticks_per_us`**: a prescaler DIVIDER of 1 divides by 2 (TRM, esp-hal), we used 1 | **Naps 2,664 → 697 per stretch, early alarms 0, wakes ~3/s of 2-3ms, awake 0.8%. ~6.7mA.** |
+
+**The bug (round 26):** esp-rtos runs TIMG1 with DIVIDER = 1, which the
+hardware treats as /2 (40 ticks/µs at 80MHz APB). The idle hook read it as
+/1 (80 ticks/µs), so each nap covered only half the time to the alarm and
+then pushed TIMG1 twice as far ahead. Every embassy timer took ~4 naps, each
+ending in a spurious "early" alarm and a 2ms near-deadline wait.
+
+## Where the current goes now (round 26, 120s gap)
+
+| Part | Average | Notes |
+|---|---|---|
+| Sleep floor (board + chip) | **4.12mA** | ~62%. Board alone was ~1.8mA (ESP32 held in reset, v1.3.1). |
+| Fetch cycle, radio on | ~2.1-3.2mA | 1.2-1.8s at ~220mA per cycle; **~70-80% of it is the AP's post-association unicast loss** (1.0-1.5s). |
+| Input poll (500ms) | ~0.3mA | 2 wakes/s × ~140mA·ms |
+| Serial status (2s) | ~0.07mA | 0.5 wakes/s × ~130mA·ms |
+| Battery (30s), main, fetch CPU time | <0.05mA | |
+| **Total** | **~6.7mA** | ~12 days on 3×AA (2,100mAh); v1.3.1 was ~20mA |
+
+Per-task split: telemetry poll counts (`task_polls_total`) times the PPK2's
+measured charge per wake; the bursts can't be told apart by period alone
+because 500ms, 2s and 30s timers line up. Each wake is ~2.5ms at ~46mA,
+mostly the idle hook's 2ms `WAKE_MARGIN_US`.
+
+**Next options:** the AP dead gap (router settings/security mode); the sleep
+floor (deep sleep between fetches, more power domains off); a smaller wake
+margin (~0.15mA).
 
 **Lessons:**
 - The leftover ~11 wakes/s are not the WiFi blob's ets timers; something
