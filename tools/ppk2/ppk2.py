@@ -41,10 +41,12 @@ def find_port():
 
 
 def open_ppk(port, mv):
-    ppk = PPK2_MP(port or find_port(), timeout=1, write_timeout=1, exclusive=True)
+    port = port or find_port()
     # A run killed mid-measurement leaves the PPK2 streaming samples, which
-    # then garble the metadata read. Stop it and drain before asking.
+    # then garble the metadata read. Stop it, drain, and if the read still
+    # fails, reopen the port (a fresh open has always worked).
     for attempt in range(5):
+        ppk = PPK2_MP(port, timeout=1, write_timeout=1, exclusive=True)
         PPK2_API.stop_measuring(ppk)
         # Drain until the port has been quiet for 300 ms: samples already in
         # flight keep arriving for a while after the stop command.
@@ -58,6 +60,7 @@ def open_ppk(port, mv):
             ppk.get_modifiers()
             break
         except (UnicodeDecodeError, ValueError):
+            ppk.ser.close()
             if attempt == 4:
                 raise
     ppk.use_source_meter()
