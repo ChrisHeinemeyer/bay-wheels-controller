@@ -45,12 +45,6 @@ const RETRY_GAP: Duration = Duration::from_secs(60);
 const SUCCESS_GAP: Duration =
     Duration::from_secs(crate::power::parse_u32(option_env!("FETCH_GAP_S"), 120) as u64);
 
-/// RADIO_DEINIT=0 (build-time) keeps the WiFi driver initialised (stopped)
-/// between cycles instead of dropping and re-creating the controller.
-const RADIO_DEINIT: bool = crate::power::parse_u32(option_env!("RADIO_DEINIT"), 1) != 0;
-/// Time for the net task to drain the RX queue before the driver goes away.
-const RX_DRAIN: Duration = Duration::from_millis(50);
-
 /// GARP=0 (build-time) skips the gratuitous ARP after each connect.
 const GARP: bool = crate::power::parse_u32(option_env!("GARP"), 1) != 0;
 
@@ -90,15 +84,12 @@ pub(super) enum FetchOutcome {
 #[embassy_executor::task]
 pub async fn fetch_task(
     stack: &'static Stack<'static>,
-    radio_init: &'static esp_radio::Controller<'static>,
     mut controller: WifiController<'static>,
     ssid: &'static str,
     password: &'static str,
 ) {
     // One-time boot scan + config; every later connect() reuses it.
-    let ap = wifi_connect::setup(&mut controller, ssid, password).await;
-    // `None` between cycles when `RADIO_DEINIT` drops the controller.
-    let mut wifi = Some(controller);
+    wifi_connect::setup(&mut controller, ssid, password).await;
 
     // Create static buffers for TCP client state and TLS.
     // TLS needs large buffers for handshake AND streaming - increase for large responses
@@ -149,19 +140,6 @@ pub async fn fetch_task(
         // confirms the radio is stopped.
         RADIO_ACTIVE.store(true, Ordering::Release);
 
-        if wifi.is_none() {
-            match wifi_connect::recreate(radio_init, ssid, password, &ap) {
-                Ok(c) => wifi = Some(c),
-                Err(e) => {
-                    crate::dprintln!("✗ WiFi re-init failed: {:?}", e);
-                    RADIO_ACTIVE.store(false, Ordering::Release);
-                    Timer::after(RETRY_GAP).await;
-                    continue;
-                }
-            }
-        }
-        let controller = wifi.as_mut().unwrap();
-
         // `setup()` already started the controller once (it needs the radio up to
         // scan) — only call `start_async()` on cycles where `teardown()` actually
         // stopped it. Calling it on an already-started controller hangs forever:
@@ -206,11 +184,11 @@ pub async fn fetch_task(
             }
         };
 
-        let connected_rssi = match wifi_connect::connect(controller, tx_power).await {
+        let connected_rssi = match wifi_connect::connect(&mut controller, tx_power).await {
             Ok(rssi) => rssi,
             Err(e) => {
                 crate::dprintln!("✗ WiFi connect failed: {:?}", e);
-                teardown(&mut wifi, stack).await;
+                teardown(&mut controller).await;
                 reset_tx_power(&mut tx_power, &mut success_streak);
                 lease = None;
                 STATUS.lock().await.wifi_connected = false;
@@ -236,7 +214,7 @@ pub async fn fetch_task(
             .is_ok();
         if !dhcp_ok {
             crate::dprintln!("✗ DHCP timed out");
-            teardown(&mut wifi, stack).await;
+            teardown(&mut controller).await;
             reset_tx_power(&mut tx_power, &mut success_streak);
             lease = None;
             STATUS.lock().await.wifi_connected = false;
@@ -319,7 +297,7 @@ pub async fn fetch_task(
 
         // Always tear the radio all the way down before the idle gap — this is
         // the whole point of the redesign (see Power-Management.md).
-        teardown(&mut wifi, stack).await;
+        teardown(&mut controller).await;
         STATUS.lock().await.wifi_connected = false;
         #[cfg(feature = "log-server")]
         {
@@ -352,30 +330,10 @@ pub async fn fetch_task(
 }
 
 /// Disconnects and stops the radio, tolerating "already stopped".
-async fn teardown(wifi: &mut Option<WifiController<'static>>, stack: &Stack<'static>) {
-    let Some(controller) = wifi.as_mut() else {
-        RADIO_ACTIVE.store(false, Ordering::Release);
-        return;
-    };
+async fn teardown(controller: &mut WifiController<'static>) {
     if controller.is_started().unwrap_or(false) {
         let _ = controller.disconnect_async().await;
         let _ = controller.stop_async().await;
-    }
-    if RADIO_DEINIT {
-        // Dropping the controller de-initialises the WiFi driver. A stopped
-        // driver kept ~11 timers/s waking the CPU out of light sleep.
-        //
-        // Nothing stops embassy-net from transmitting into a de-initialised
-        // driver, which crashes (esp_wifi_internal_tx through a null
-        // pointer): seen when it answered a frame still in the RX queue. So
-        // first take the IP config away, leaving smoltcp nothing to send,
-        // and let the net task drain the RX queue. Each cycle sets the config
-        // again before connecting.
-        stack.set_config_v4(ConfigV4::None);
-        Timer::after(RX_DRAIN).await;
-        *wifi = None;
-        RADIO_ACTIVE.store(false, Ordering::Release);
-        return;
     }
     // Only let the CPU light-sleep once the radio is confirmed stopped; an
     // unreadable state counts as still running.

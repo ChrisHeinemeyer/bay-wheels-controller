@@ -80,21 +80,7 @@ pub async fn setup(
     crate::dprintln!("  Auth Method: {:?}", target_ap.auth_method);
     crate::dprintln!("");
 
-    crate::dprintln!("Setting WiFi config for SSID: '{}'", ssid);
-    crate::dprintln!("  Auth method: {:?}", target_ap.auth_method);
-    crate::dprintln!("  Channel: {:?}", target_ap.channel);
-    configure(controller, ssid, password, &target_ap).unwrap();
-
-    target_ap
-}
-
-/// Applies the client configuration for the AP found by [`setup`].
-fn configure(
-    controller: &mut WifiController<'static>,
-    ssid: &'static str,
-    password: &'static str,
-    ap: &ApInfo,
-) -> Result<(), WifiError> {
+    // Configure with scanned AP settings.
     // listen_interval=10: radio sleeps for 10 beacon intervals (~1 s) in MAX_MODEM power save.
     // This only matters while `fetch_task` briefly re-enables modem sleep between
     // connect and the first fetch on a cycle — the radio is fully stopped the rest
@@ -102,29 +88,19 @@ fn configure(
     let client_config = esp_radio::wifi::ClientConfig::default()
         .with_ssid(String::from(ssid))
         .with_password(String::from(password))
-        .with_auth_method(ap.auth_method.unwrap_or(AuthMethod::Wpa2Personal))
-        .with_channel(ap.channel)
+        .with_auth_method(target_ap.auth_method.unwrap_or(AuthMethod::Wpa2Personal))
+        .with_channel(target_ap.channel)
         .with_listen_interval(10);
-    controller.set_config(&esp_radio::wifi::ModeConfig::Client(client_config))
-}
 
-/// Creates a fresh controller after the previous one was dropped (which
-/// de-initialises the WiFi driver and frees its timers), in station mode with
-/// the AP found by [`setup`]. The embassy-net stack's `WifiDevice` keeps
-/// working: it is only a handle onto esp-radio's global RX/TX queues.
-pub fn recreate(
-    radio_init: &'static esp_radio::Controller<'static>,
-    ssid: &'static str,
-    password: &'static str,
-    ap: &ApInfo,
-) -> Result<WifiController<'static>, WifiError> {
-    // SAFETY: the WIFI peripheral's only other owner was the controller just
-    // dropped; there is never more than one controller at a time.
-    let wifi = unsafe { esp_hal::peripherals::WIFI::steal() };
-    let (mut controller, _interfaces) = esp_radio::wifi::new(radio_init, wifi, Default::default())?;
-    controller.set_mode(esp_radio::wifi::WifiMode::Sta)?;
-    configure(&mut controller, ssid, password, ap)?;
-    Ok(controller)
+    crate::dprintln!("Setting WiFi config for SSID: '{}'", ssid);
+    crate::dprintln!("  Auth method: {:?}", target_ap.auth_method);
+    crate::dprintln!("  Channel: {:?}", target_ap.channel);
+
+    controller
+        .set_config(&esp_radio::wifi::ModeConfig::Client(client_config))
+        .unwrap();
+
+    target_ap
 }
 
 /// Connects (or reconnects) using the configuration already applied by [`setup`],

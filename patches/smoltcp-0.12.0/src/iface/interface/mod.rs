@@ -371,10 +371,10 @@ impl Interface {
     pub fn update_ip_addrs<F: FnOnce(&mut Vec<IpCidr, IFACE_MAX_ADDR_COUNT>)>(&mut self, f: F) {
         // PATCHED (bay-wheels-controller): flush the neighbor cache only when
         // the addresses actually change. embassy-net re-applies the same
-        // static config on every reconnect (and the firmware clears it while
-        // the radio is off), and the flush made each fetch cycle start by
-        // ARPing for the mirror host again. Compare against the last
-        // non-empty address list, and never flush on the way to "none".
+        // static config on every reconnect (and drops it on link-down in DHCP
+        // mode), and the flush made each fetch cycle start by ARPing for the
+        // mirror host again. Compare against the last non-empty address list,
+        // and never flush on the way to "none".
         f(&mut self.inner.ip_addrs);
         if !self.inner.ip_addrs.is_empty() && self.inner.ip_addrs != self.inner.last_ip_addrs {
             InterfaceInner::flush_neighbor_cache(&mut self.inner);
