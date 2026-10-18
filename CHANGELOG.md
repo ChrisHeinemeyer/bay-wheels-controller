@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-18
+
+The sleep floor went from 4.14mA to ~2.64mA (PPK2 at 4.5V), so the average at
+the 120s fetch gap drops from ~4.6mA to ~3.1mA in a clean gateway phase: about
+28 days on 3×AA alkaline instead of ~19.
+
+### Fixed
+
+- The AL5887 LED driver's power-saving mode was never enabled (DEVICE_CONFIG1
+  resets with Power_Save_EN off), and the driver stayed chip-enabled from boot
+  until the first touch. With all LEDs off it drew ~1.5mA. `init_driver` now
+  sets Power_Save_EN, and the driver is chip-disabled from boot whenever no
+  station is touched (`LED_IDLE`, default 1).
+
+### Added
+
+- Sleep-floor measurement builds (build-time env vars, all off by default):
+  `DEEP_SLEEP_TEST=1..4` (board-only current with the ESP32 in deep sleep),
+  `LED_IDLE=0|2`, `SLEEP_VDDSDIO_PD`, `SLEEP_RTC_PERI_PD` (hangs; experiment
+  only). `tools/ppk2/build-step1.sh` builds one ELF per measurement.
+
 ## [1.4.0] - 2026-10-18
 
 Average current at the 120s fetch gap went from ~20mA to ~4.6-6.6mA (PPK2 at
@@ -267,7 +288,8 @@ Initial firmware bring-up.
 - Switched target chip from ESP32-C6 to ESP32-S3.
 - Replaced heap-allocated `alloc::vec::Vec` with `heapless::Vec`.
 
-[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ChrisHeinemeyer/bay-wheels-controller/compare/v1.2.1...v1.3.0
