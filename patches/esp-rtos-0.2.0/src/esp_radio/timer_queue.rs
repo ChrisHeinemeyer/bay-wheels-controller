@@ -434,6 +434,21 @@ pub mod stats {
         }
     }
 
+    static ARMS: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
+
+    /// Counts an RTOS alarm armed for: 0 a sleeping thread, 1 the time
+    /// slice, 2 the embassy timer queue, 3 nothing / unknown.
+    pub(crate) fn record_arm(source: usize) {
+        if ENABLED.load(Ordering::Relaxed) {
+            ARMS[source].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Alarms armed by source (see `record_arm`).
+    pub fn arms() -> [u32; 4] {
+        core::array::from_fn(|i| ARMS[i].load(Ordering::Relaxed))
+    }
+
     /// `(thread entry address, timed sleeps)` per used slot.
     pub fn sleeps() -> [(usize, u32); SLOTS] {
         let mut out = [(usize::MAX, 0); SLOTS];
