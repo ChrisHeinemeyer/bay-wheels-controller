@@ -444,6 +444,27 @@ pub mod stats {
         }
     }
 
+    /// Embassy queue: [alarms that came too early, alarms processed,
+    /// schedule_wake calls that added or moved a timer].
+    static EMBASSY: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+
+    pub(crate) fn record_embassy_alarm(processed: bool) {
+        if ENABLED.load(Ordering::Relaxed) {
+            EMBASSY[processed as usize].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn record_embassy_schedule() {
+        if ENABLED.load(Ordering::Relaxed) {
+            EMBASSY[2].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// See `EMBASSY`.
+    pub fn embassy() -> [u32; 3] {
+        core::array::from_fn(|i| EMBASSY[i].load(Ordering::Relaxed))
+    }
+
     /// Alarms armed by source (see `record_arm`).
     pub fn arms() -> [u32; 4] {
         core::array::from_fn(|i| ARMS[i].load(Ordering::Relaxed))

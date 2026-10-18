@@ -240,6 +240,9 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         // RTOS alarms armed for: [sleeping thread, time slice, embassy, other].
         let _ = out.push_str(",\"rtos_arms\":");
         push_json_array(out, &esp_rtos::radio_timer_stats::arms());
+        // Embassy alarms: [too early, processed, timers scheduled].
+        let _ = out.push_str(",\"embassy_alarms\":");
+        push_json_array(out, &esp_rtos::radio_timer_stats::embassy());
     }
 
     let mut summary = heapless::String::<256>::new();
