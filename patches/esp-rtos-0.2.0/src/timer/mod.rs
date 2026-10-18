@@ -208,6 +208,10 @@ impl TimeDriver {
 
         current_task.set_state(TaskState::Sleeping);
 
+        // PATCHED (bay-wheels-controller): which threads keep arming wakeups.
+        #[cfg(feature = "esp-radio")]
+        crate::esp_radio::radio_timer_stats::record_sleep(unsafe { current_task.as_ref().entry });
+
         let timestamp = at.duration_since_epoch().as_micros();
         debug!(
             "Scheduling wakeup for task {:?} at timestamp {}",

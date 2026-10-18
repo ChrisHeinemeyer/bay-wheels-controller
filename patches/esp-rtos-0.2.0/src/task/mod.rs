@@ -338,6 +338,9 @@ pub(crate) struct Task {
     pub pinned_to: Option<Cpu>,
 
     pub wakeup_at: u64,
+    /// PATCHED (bay-wheels-controller): entry function address (0 for the
+    /// main task), to tell threads apart in `radio_timer_stats`.
+    pub entry: usize,
 
     /// Whether the task is currently queued in the run queue.
     pub run_queued: bool,
@@ -435,6 +438,7 @@ impl Task {
             pinned_to,
 
             wakeup_at: 0,
+            entry: task_fn as usize,
             timer_queued: false,
             run_queued: false,
 

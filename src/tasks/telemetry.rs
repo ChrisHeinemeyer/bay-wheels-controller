@@ -224,8 +224,19 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         let _ = write!(
             out,
             "}},\"radio_timer_other\":{other},\"radio_timer_passes\":{passes},\
-             \"radio_timer_empty_passes\":{empty}"
+             \"radio_timer_empty_passes\":{empty},\"thread_sleeps\":{{"
         );
+        // Timed sleeps by esp-rtos thread entry function (0 = main/embassy).
+        let mut first = true;
+        for (entry, n) in esp_rtos::radio_timer_stats::sleeps()
+            .iter()
+            .filter(|(e, _)| *e != usize::MAX)
+        {
+            let sep = if first { "" } else { "," };
+            let _ = write!(out, "{sep}\"{entry:#010x}\":{n}");
+            first = false;
+        }
+        let _ = out.push('}');
     }
 
     let mut summary = heapless::String::<256>::new();

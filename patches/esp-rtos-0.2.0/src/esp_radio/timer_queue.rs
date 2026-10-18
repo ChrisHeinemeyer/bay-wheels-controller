@@ -411,6 +411,41 @@ pub mod stats {
         }
     }
 
+    static SLEEP_ENTRIES: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(usize::MAX) }; SLOTS];
+    static SLEEPS: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+
+    /// Counts a timed sleep by the thread whose entry function is `entry`
+    /// (0 = main task, which runs the embassy executor).
+    pub(crate) fn record_sleep(entry: usize) {
+        if !ENABLED.load(Ordering::Relaxed) {
+            return;
+        }
+        for i in 0..SLOTS {
+            let cur = SLEEP_ENTRIES[i].load(Ordering::Relaxed);
+            if cur == entry
+                || (cur == usize::MAX
+                    && SLEEP_ENTRIES[i]
+                        .compare_exchange(usize::MAX, entry, Ordering::Relaxed, Ordering::Relaxed)
+                        .map_or_else(|v| v == entry, |_| true))
+            {
+                SLEEPS[i].fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        }
+    }
+
+    /// `(thread entry address, timed sleeps)` per used slot.
+    pub fn sleeps() -> [(usize, u32); SLOTS] {
+        let mut out = [(usize::MAX, 0); SLOTS];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = (
+                SLEEP_ENTRIES[i].load(Ordering::Relaxed),
+                SLEEPS[i].load(Ordering::Relaxed),
+            );
+        }
+        out
+    }
+
     /// `(function address, fires)` per slot (unused slots are `(0, 0)`), plus
     /// (fires of other functions, passes, empty passes). Totals since boot.
     pub fn snapshot() -> ([(usize, u32); SLOTS], (u32, u32, u32)) {
