@@ -45,6 +45,9 @@ const RETRY_GAP: Duration = Duration::from_secs(60);
 const SUCCESS_GAP: Duration =
     Duration::from_secs(crate::power::parse_u32(option_env!("FETCH_GAP_S"), 120) as u64);
 
+/// GARP=0 (build-time) skips the gratuitous ARP after each connect.
+const GARP: bool = crate::power::parse_u32(option_env!("GARP"), 1) != 0;
+
 /// Where the fetch's radio-on time goes. `body_ms - parse_ms` is time spent
 /// waiting on the network and in TLS decryption; `parse_ms` is CPU-only.
 #[derive(Default, Clone, Copy)]
@@ -204,6 +207,12 @@ pub async fn fetch_task(
         };
         crate::dprintln!("✓ Connected (RSSI: {})", connected_rssi);
         let connected_at = Instant::now();
+        // Announce ourselves before anything has to reach us: with the ARP
+        // cache and lease reused, nothing else from this station tells the
+        // LAN it is back, and unicast to it was lost for 1-3 s.
+        if GARP {
+            smoltcp::iface::ANNOUNCE_ARP.store(true, Ordering::Relaxed);
+        }
         #[cfg(feature = "log-server")]
         {
             heap_steps.after_connect = heap();

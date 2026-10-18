@@ -186,6 +186,11 @@ impl Config {
 pub static RX_GROUP_FRAMES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// PATCHED (bay-wheels-controller): unicast frames received.
 pub static RX_UNICAST_FRAMES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// PATCHED (bay-wheels-controller): set to make the next `poll` broadcast a
+/// gratuitous ARP for our IPv4 address. The firmware sets it after each WiFi
+/// re-association, so the LAN learns where the station is before the first
+/// unicast reply has to find it.
+pub static ANNOUNCE_ARP: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 impl Interface {
     /// Create a network interface using the previously provided configuration.
@@ -445,6 +450,36 @@ impl Interface {
     /// [`poll_egress()`](Self::poll_egress) and [`poll_ingress_single()`](Self::poll_ingress_single).
     /// This allows you to insert yields or process other events between processing
     /// individual ingress packets.
+    /// PATCHED (bay-wheels-controller): broadcast a gratuitous ARP request for
+    /// our own IPv4 address. `false` if it couldn't be sent yet (no address,
+    /// not Ethernet, or no TX buffer), to be retried on the next poll.
+    #[cfg(all(feature = "medium-ethernet", feature = "proto-ipv4"))]
+    fn announce_arp(&mut self, device: &mut (impl Device + ?Sized)) -> bool {
+        if self.inner.caps.medium != Medium::Ethernet {
+            return true; // nothing to announce on
+        }
+        let Some(addr) = self.inner.ipv4_addr() else {
+            return false;
+        };
+        let Some(tx_token) = device.transmit(self.inner.now) else {
+            return false;
+        };
+        let arp_repr = ArpRepr::EthernetIpv4 {
+            operation: ArpOperation::Request,
+            source_hardware_addr: self.inner.hardware_addr.ethernet_or_panic(),
+            source_protocol_addr: addr,
+            target_hardware_addr: EthernetAddress([0; 6]),
+            target_protocol_addr: addr,
+        };
+        self.inner
+            .dispatch_ethernet(tx_token, arp_repr.buffer_len(), |mut frame| {
+                frame.set_dst_addr(EthernetAddress::BROADCAST);
+                frame.set_ethertype(EthernetProtocol::Arp);
+                arp_repr.emit(&mut ArpPacket::new_unchecked(frame.payload_mut()))
+            })
+            .is_ok()
+    }
+
     pub fn poll(
         &mut self,
         timestamp: Instant,
@@ -457,6 +492,14 @@ impl Interface {
 
         #[cfg(feature = "_proto-fragmentation")]
         self.fragments.assembler.remove_expired(timestamp);
+
+        // PATCHED (bay-wheels-controller): see ANNOUNCE_ARP.
+        #[cfg(all(feature = "medium-ethernet", feature = "proto-ipv4"))]
+        if ANNOUNCE_ARP.swap(false, core::sync::atomic::Ordering::Relaxed)
+            && !self.announce_arp(device)
+        {
+            ANNOUNCE_ARP.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
 
         // Process ingress while there's packets available.
         loop {

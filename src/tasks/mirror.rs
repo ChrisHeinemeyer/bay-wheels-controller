@@ -12,9 +12,9 @@ use core::fmt::Write as _;
 use core::net::SocketAddr;
 
 use embassy_futures::select::{Either, select};
-use embassy_net::{IpAddress, IpEndpoint, Stack};
 use embassy_net::tcp::client::TcpClient;
 use embassy_net::udp::{PacketMetadata, UdpSocket};
+use embassy_net::{IpAddress, IpEndpoint, Stack};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::{Read as _, Write as _};
 use embedded_nal_async::TcpConnect as _;
@@ -202,9 +202,8 @@ impl Probe {
         static mut TX_BUF: [u8; 256] = [0; 256];
         static CYCLE: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
         #[allow(static_mut_refs)]
-        let mut socket = unsafe {
-            UdpSocket::new(stack, &mut RX_META, &mut RX_BUF, &mut TX_META, &mut TX_BUF)
-        };
+        let mut socket =
+            unsafe { UdpSocket::new(stack, &mut RX_META, &mut RX_BUF, &mut TX_META, &mut TX_BUF) };
         let _ = socket.bind(40_000);
         let dest = match dest {
             SocketAddr::V4(v4) => IpEndpoint::new(IpAddress::Ipv4(*v4.ip()), v4.port()),
