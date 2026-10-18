@@ -130,6 +130,9 @@ pub struct SleepTotals {
     /// How far SYSTIMER and TIMG1 moved by themselves across sleep calls (ms).
     pub sys_bracket_ms: u64,
     pub timg_bracket_ms: u64,
+    /// Naps with the TIMG1 alarm interrupt raised before the sleep, right
+    /// after it, and after advancing the counters.
+    pub int_raw: [u32; 3],
 }
 
 static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
@@ -145,6 +148,7 @@ static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
         task_polls: [0; 10],
         sys_bracket_ms: 0,
         timg_bracket_ms: 0,
+        int_raw: [0; 3],
     }));
 
 /// Totals up to the end of the last sleeping stretch.
@@ -248,6 +252,9 @@ mod inner {
         /// How far SYSTIMER and TIMG1 moved by themselves across sleep calls.
         sys_bracket_us: u64,
         timg_bracket_us: u64,
+        /// TIMG1 alarm interrupt raised: before the sleep, right after it,
+        /// and after advancing the counters (counts of naps).
+        int_raw: [u32; 3],
         /// Newly armed scheduler timers, bucketed by length (`ARMED_BUCKETS_MS`).
         armed: [u32; ARMED_BUCKETS_MS.len() + 1],
     }
@@ -397,6 +404,9 @@ mod inner {
                 t.timer_wakes += s.timer_wakes;
                 t.sys_bracket_ms += s.sys_bracket_us / 1000;
                 t.timg_bracket_ms += s.timg_bracket_us / 1000;
+                for (total, n) in t.int_raw.iter_mut().zip(s.int_raw) {
+                    *total += n;
+                }
                 for (total, n) in t.armed.iter_mut().zip(s.armed) {
                     *total += n;
                 }
@@ -530,6 +540,7 @@ mod inner {
         let rtc_before = state.rtc.time_since_boot();
         let sys_before = systimer_count();
         let timg_before = timg1_t0_count();
+        let int_before = timg1_int_raw();
 
         // esp-hal converts this to RC_SLOW ticks at its nominal frequency, so
         // ask for the nominal duration that comes out to `nap_us` real time.
@@ -541,6 +552,7 @@ mod inner {
         state.rtc.sleep(&cfg, &[&timer, &state.wake_button]);
 
         let cause = LPWR::regs().slp_wakeup_cause().read().wakeup_cause().bits();
+        let int_after_sleep = timg1_int_raw();
         latch_rtc_time();
         let rtc_us = (state.rtc.time_since_boot() - rtc_before).as_micros();
         let sys_us = (systimer_count() - sys_before) / SYSTIMER_TICKS_PER_US;
@@ -568,7 +580,11 @@ mod inner {
             }
         }
 
+        let int_after_advance = timg1_int_raw();
         let s = &mut state.stats;
+        s.int_raw[0] += int_before as u32;
+        s.int_raw[1] += int_after_sleep as u32;
+        s.int_raw[2] += int_after_advance as u32;
         s.sys_bracket_us += sys_us;
         s.timg_bracket_us += timg_us;
         s.naps += 1;
@@ -642,6 +658,11 @@ mod inner {
         t.update().write(|w| w.update().set_bit());
         while t.update().read().update().bit_is_set() {}
         ((t.hi().read().bits() as u64) << 32) | t.lo().read().bits() as u64
+    }
+
+    /// Whether TIMG1 timer 0's alarm interrupt is raised.
+    fn timg1_int_raw() -> bool {
+        TIMG1::regs().int_raw().read().t(0).bit_is_set()
     }
 
     fn timg1_t0_alarm() -> u64 {
