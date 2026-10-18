@@ -198,11 +198,19 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         smoltcp::socket::dhcpv4::LAST_LEASE_SECS.load(core::sync::atomic::Ordering::Relaxed),
     );
     // What wakes the CPU while asleep (totals since boot; see `SleepTotals`).
-    let _ = write!(out, ",\"timer_wakes_total\":{},\"armed_total\":", sleep.timer_wakes);
+    let _ = write!(
+        out,
+        ",\"timer_wakes_total\":{},\"armed_total\":",
+        sleep.timer_wakes
+    );
     push_json_array(out, &sleep.armed);
     #[cfg(feature = "sleep-trace")]
     {
-        let _ = write!(out, ",\"executor_wakes_total\":{},\"task_polls_total\":", sleep.executor_wakes);
+        let _ = write!(
+            out,
+            ",\"executor_wakes_total\":{},\"task_polls_total\":",
+            sleep.executor_wakes
+        );
         push_json_array(out, &sleep.task_polls);
     }
 
