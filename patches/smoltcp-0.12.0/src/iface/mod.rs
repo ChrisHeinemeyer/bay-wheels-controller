@@ -20,6 +20,7 @@ mod packet;
 pub use self::interface::multicast::MulticastError;
 pub use self::interface::{
     Config, Interface, InterfaceInner as Context, PollIngressSingleResult, PollResult,
+    RX_GROUP_FRAMES, RX_UNICAST_FRAMES, // PATCHED (bay-wheels-controller)
 };
 
 pub use self::route::{Route, RouteTableFull, Routes};

@@ -12,7 +12,8 @@ use core::fmt::Write as _;
 use core::net::SocketAddr;
 
 use embassy_net::tcp::client::TcpClient;
-use embassy_time::{Duration, Instant, with_timeout};
+use embassy_futures::select::{Either, select};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::{Read as _, Write as _};
 use embedded_nal_async::TcpConnect as _;
 
@@ -72,13 +73,16 @@ pub async fn fetch<const N: usize, const TX: usize, const RX: usize>(
     // TCP's own SYN retransmit waits 1 s, then 2 s. A fresh connect attempt
     // every CONNECT_RETRY gets in as soon as the link passes frames, and
     // `handshake_ms` then measures that dead time.
+    let mut rx = RxWatch::new(connect_start);
     let mut conn = loop {
-        match with_timeout(CONNECT_RETRY, tcp.connect(addr)).await {
-            Ok(Ok(conn)) => break conn,
-            Ok(Err(_)) => return Err("connect"),
+        match with_timeout(CONNECT_RETRY, select(tcp.connect(addr), rx.run(timings))).await {
+            Ok(Either::First(Ok(conn))) => break conn,
+            Ok(Either::First(Err(_))) => return Err("connect"),
+            Ok(Either::Second(never)) => match never {},
             Err(_) => continue, // the outer MIRROR_TIMEOUT bounds this
         }
     };
+    rx.check(timings);
     timings.handshake_ms = ms_since(connect_start);
 
     let request_start = Instant::now();
@@ -129,6 +133,46 @@ pub async fn fetch<const N: usize, const TX: usize, const RX: usize>(
         FetchOutcome::Success => Ok(()),
         FetchOutcome::ConnectionLost => Err("parse"),
     }
+}
+
+/// Notes when the first frames arrive after the connect starts, to tell a
+/// link that receives nothing from one where only our own traffic is lost.
+struct RxWatch {
+    start: Instant,
+    group0: u32,
+    unicast0: u32,
+}
+
+impl RxWatch {
+    fn new(start: Instant) -> Self {
+        let (group0, unicast0) = rx_frames();
+        Self { start, group0, unicast0 }
+    }
+
+    fn check(&self, timings: &mut FetchTimings) {
+        let (group, unicast) = rx_frames();
+        if group != self.group0 && timings.first_group_rx_ms.is_none() {
+            timings.first_group_rx_ms = Some(ms_since(self.start));
+        }
+        if unicast != self.unicast0 && timings.first_unicast_rx_ms.is_none() {
+            timings.first_unicast_rx_ms = Some(ms_since(self.start));
+        }
+    }
+
+    async fn run(&mut self, timings: &mut FetchTimings) -> core::convert::Infallible {
+        loop {
+            self.check(timings);
+            Timer::after_millis(5).await;
+        }
+    }
+}
+
+fn rx_frames() -> (u32, u32) {
+    use core::sync::atomic::Ordering::Relaxed;
+    (
+        smoltcp::iface::RX_GROUP_FRAMES.load(Relaxed),
+        smoltcp::iface::RX_UNICAST_FRAMES.load(Relaxed),
+    )
 }
 
 fn ms_since(from: Instant) -> u32 {

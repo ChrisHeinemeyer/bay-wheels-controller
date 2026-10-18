@@ -182,6 +182,11 @@ impl Config {
     }
 }
 
+/// PATCHED (bay-wheels-controller): broadcast/multicast frames received.
+pub static RX_GROUP_FRAMES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// PATCHED (bay-wheels-controller): unicast frames received.
+pub static RX_UNICAST_FRAMES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 impl Interface {
     /// Create a network interface using the previously provided configuration.
     ///
@@ -581,6 +586,14 @@ impl Interface {
         rx_token.consume(|frame| {
             if frame.is_empty() {
                 return PollIngressSingleResult::PacketProcessed;
+            }
+            // PATCHED (bay-wheels-controller): count received frames, so the
+            // firmware can see when traffic first arrives after re-association.
+            {
+                use core::sync::atomic::Ordering;
+                let group = frame[0] & 1 != 0; // Ethernet I/G bit of the destination
+                if group { &RX_GROUP_FRAMES } else { &RX_UNICAST_FRAMES }
+                    .fetch_add(1, Ordering::Relaxed);
             }
 
             match self.inner.caps.medium {

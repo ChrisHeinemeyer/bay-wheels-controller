@@ -62,6 +62,11 @@ pub struct FetchTimings {
     /// Time inside the station parser, summed over chunks.
     pub parse_ms: u32,
     pub body_bytes: u32,
+    /// Mirror only: ms from the start of the TCP connect to the first
+    /// broadcast/multicast and the first unicast frame received (`None` if
+    /// none arrived before the connect succeeded).
+    pub first_group_rx_ms: Option<u32>,
+    pub first_unicast_rx_ms: Option<u32>,
 }
 
 /// Outcome of one fetch attempt over a freshly-opened connection.
