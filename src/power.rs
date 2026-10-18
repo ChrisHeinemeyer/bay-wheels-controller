@@ -31,13 +31,14 @@
 use core::sync::atomic::AtomicBool;
 
 /// Which parts of the chip light sleep powers down, from the `SLEEP_CFG` build
-/// env var (default 0). Each level adds to the one before:
+/// env var (default 2: asleep current 11.9 → 4.4 mA on the PPK2; level 3 only
+/// saved another ~0.1 mA). Each level adds to the one before:
 /// - 0: esp-hal's default `RtcSleepConfig`.
 /// - 1: internal 8 MHz oscillator off.
 /// - 2: ESP-IDF's light-sleep regulator settings with XTAL and 8M off (digital
 ///   rail dropped in sleep, bias and current-monitor powered down).
 /// - 3: WiFi/modem power domain off. The radio is stopped during every nap.
-pub const SLEEP_CFG: u32 = parse_u32(option_env!("SLEEP_CFG"), 0);
+pub const SLEEP_CFG: u32 = parse_u32(option_env!("SLEEP_CFG"), 2);
 
 /// Highest `SLEEP_CFG` level.
 pub const SLEEP_CFG_MAX: u32 = 3;
