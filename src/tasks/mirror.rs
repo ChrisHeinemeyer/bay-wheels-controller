@@ -220,25 +220,50 @@ impl Probe {
     }
 
     async fn run(&mut self) -> core::convert::Infallible {
-        let mut buf = [0u8; 16];
         loop {
-            // "BWP" cycle seq
-            let mut msg = [b'B', b'W', b'P', 0, 0, 0, 0];
-            msg[3..5].copy_from_slice(&self.cycle.to_be_bytes());
-            msg[5..7].copy_from_slice(&self.seq.to_be_bytes());
-            let _ = self.socket.send_to(&msg, self.dest).await;
-            self.seq = self.seq.wrapping_add(1);
-            let next = Instant::now() + PROBE_INTERVAL;
-            while let Ok(Ok((n, _))) =
-                embassy_time::with_deadline(next, self.socket.recv_from(&mut buf)).await
-            {
-                if self.first_echo.is_none() && n >= 7 && buf[..3] == *b"BWP" {
-                    let seq = u16::from_be_bytes([buf[5], buf[6]]);
-                    self.first_echo = Some((ms_since(self.start), seq));
-                }
+            self.step(PROBE_INTERVAL).await;
+        }
+    }
+
+    /// Sends one probe, then collects echoes for `interval`.
+    async fn step(&mut self, interval: Duration) {
+        let mut buf = [0u8; 16];
+        // "BWP" cycle seq
+        let mut msg = [b'B', b'W', b'P', 0, 0, 0, 0];
+        msg[3..5].copy_from_slice(&self.cycle.to_be_bytes());
+        msg[5..7].copy_from_slice(&self.seq.to_be_bytes());
+        let _ = self.socket.send_to(&msg, self.dest).await;
+        self.seq = self.seq.wrapping_add(1);
+        let next = Instant::now() + interval;
+        while let Ok(Ok((n, _))) =
+            embassy_time::with_deadline(next, self.socket.recv_from(&mut buf)).await
+        {
+            if self.first_echo.is_none() && n >= 7 && buf[..3] == *b"BWP" {
+                let seq = u16::from_be_bytes([buf[5], buf[6]]);
+                self.first_echo = Some((ms_since(self.start), seq));
             }
         }
     }
+}
+
+/// How often `wait_for_downlink` probes while the radio dozes.
+const DOZE_PROBE_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Probes the mirror host until an echo comes back, i.e. until unicast toward
+/// us gets through, or `limit` passes. Meant to run with WiFi power save on,
+/// so the 1-3 s after a re-association in which the AP's unicast to us is
+/// lost costs modem-sleep current instead of full receive current. Returns
+/// the ms until the first echo.
+pub async fn wait_for_downlink(stack: Stack<'static>, limit: Duration) -> Option<u32> {
+    let addr: SocketAddr = GBFS_MIRROR.parse().ok()?;
+    let mut probe = Probe::new(stack, addr, Instant::now());
+    let _ = with_timeout(limit, async {
+        while probe.first_echo.is_none() {
+            probe.step(DOZE_PROBE_INTERVAL).await;
+        }
+    })
+    .await;
+    probe.first_echo.map(|(ms, _)| ms)
 }
 
 fn rx_frames() -> (u32, u32) {
