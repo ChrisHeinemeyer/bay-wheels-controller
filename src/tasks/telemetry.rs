@@ -200,7 +200,8 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
     // What wakes the CPU while asleep (totals since boot; see `SleepTotals`).
     let _ = write!(
         out,
-        ",\"sys_bracket_ms\":{},\"timg_bracket_ms\":{}",
+        ",\"pmf_set\":{},\"sys_bracket_ms\":{},\"timg_bracket_ms\":{}",
+        super::wifi_connect::PMF_SET_RESULT.load(core::sync::atomic::Ordering::Relaxed),
         sleep.sys_bracket_ms, sleep.timg_bracket_ms
     );
     let _ = out.push_str(",\"int_raw\":");

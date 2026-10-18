@@ -99,8 +99,37 @@ pub async fn setup(
     controller
         .set_config(&esp_radio::wifi::ModeConfig::Client(client_config))
         .unwrap();
+    if !PMF_CAPABLE {
+        disable_pmf();
+    }
 
     target_ap
+}
+
+/// PMF=0 (build-time): associate without 802.11w protected management
+/// frames. esp-radio always sets the station PMF-capable. Experiment for the
+/// 1-3 s after re-association in which the AP's unicast to us is lost.
+const PMF_CAPABLE: bool = crate::power::parse_u32(option_env!("PMF"), 1) != 0;
+
+/// `esp_err_t` of turning PMF off (0 = applied), or -1 if it wasn't tried.
+pub static PMF_SET_RESULT: core::sync::atomic::AtomicI32 = core::sync::atomic::AtomicI32::new(-1);
+
+/// Clears `pmf_cfg.capable` in the station config esp-radio just applied.
+fn disable_pmf() {
+    use esp_wifi_sys::include::{
+        esp_wifi_get_config, esp_wifi_set_config, wifi_config_t, wifi_interface_t_WIFI_IF_STA,
+    };
+    // SAFETY: `wifi_config_t` is a plain C union that `esp_wifi_get_config`
+    // fills in for the station interface, which is the variant used here.
+    unsafe {
+        let mut cfg: wifi_config_t = core::mem::zeroed();
+        let got = esp_wifi_get_config(wifi_interface_t_WIFI_IF_STA, &mut cfg);
+        cfg.sta.pmf_cfg.capable = false;
+        cfg.sta.pmf_cfg.required = false;
+        let set = esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut cfg);
+        crate::dprintln!("PMF disabled (get {}, set {})", got, set);
+        PMF_SET_RESULT.store(if got != 0 { got } else { set }, core::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Connects (or reconnects) using the configuration already applied by [`setup`],
