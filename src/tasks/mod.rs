@@ -1,6 +1,8 @@
 pub mod battery;
 pub mod fetch;
 pub mod input_read;
+#[cfg(feature = "gbfs-mirror")]
+pub mod mirror;
 pub mod serial_status;
 pub mod signals;
 pub mod station_leds;

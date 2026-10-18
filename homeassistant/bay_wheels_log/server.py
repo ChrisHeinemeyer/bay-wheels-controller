@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import time
+import urllib.request
 from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +32,65 @@ DIVIDER = (100 + 22) / 22
 
 lock = threading.Lock()
 reports = deque(maxlen=KEEP)
+
+# GBFS mirror (firmware `gbfs-mirror` feature): keep a copy of Lyft's
+# station_status feed and serve only the stations a board asks for, over plain
+# HTTP. That spares the board DNS, the TLS handshake and ~270 KB of download
+# per cycle. The feed regenerates every 60 s (its `ttl`); polling every 30 s
+# keeps the copy at most ~90 s behind Lyft.
+GBFS_URL = os.environ.get(
+    "GBFS_URL", "https://gbfs.lyft.com/gbfs/2.3/bay/en/station_status.json"
+)
+MIRROR_EVERY_S = 30
+# Older than this and the mirror answers 503, so the board fetches from Lyft.
+MIRROR_STALE_S = 5 * 60
+mirror = {"fetched_at": 0.0, "last_updated": 0, "ttl": 60, "by_id": {}, "error": None, "served": 0}
+
+
+def mirror_loop():
+    while True:
+        try:
+            req = urllib.request.Request(GBFS_URL, headers={"User-Agent": "bay-wheels-log"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                feed = json.load(r)
+            by_id = {s["station_id"]: s for s in feed["data"]["stations"]}
+            with lock:
+                mirror.update(
+                    fetched_at=time.time(),
+                    last_updated=feed.get("last_updated", 0),
+                    ttl=feed.get("ttl", 60),
+                    by_id=by_id,
+                    error=None,
+                )
+        except Exception as e:  # keep serving the last good copy until it goes stale
+            with lock:
+                mirror["error"] = f"{type(e).__name__}: {e}"
+            print(f"GBFS mirror fetch failed: {e}", flush=True)
+        time.sleep(MIRROR_EVERY_S)
+
+
+def mirror_response(query):
+    """(status, body) for GET /gbfs/station_status.json?ids=a,b,c[&fields=x,y].
+
+    `fields`, if given, keeps only those keys of each station (the firmware
+    only reads a few), which shrinks the response several-fold."""
+    q = parse_qs(query)
+    ids = [i for i in q.get("ids", [""])[0].split(",") if i]
+    fields = [f for f in q.get("fields", [""])[0].split(",") if f]
+    with lock:
+        age = time.time() - mirror["fetched_at"]
+        if not mirror["by_id"] or age > MIRROR_STALE_S:
+            return 503, "mirror not ready or stale\n"
+        stations = [mirror["by_id"][i] for i in ids if i in mirror["by_id"]]
+        if fields:
+            stations = [{k: s[k] for k in fields if k in s} for s in stations]
+        mirror["served"] += 1
+        body = {
+            "last_updated": mirror["last_updated"],
+            "ttl": mirror["ttl"],
+            "data": {"stations": stations},
+        }
+    return 200, json.dumps(body)
 
 
 def load():
@@ -108,6 +168,19 @@ def card(label, value, sub=""):
     )
 
 
+def mirror_card(now):
+    with lock:
+        fetched_at, n, served, error = (
+            mirror["fetched_at"], len(mirror["by_id"]), mirror["served"], mirror["error"]
+        )
+    if not fetched_at:
+        return card("GBFS mirror", "—", html.escape(error or "first fetch pending"))
+    sub = f"{n} stations · served {served}×"
+    if error:
+        sub += f" · last error: {html.escape(error)}"
+    return card("GBFS mirror", fmt_age(now - fetched_at) + " old", sub)
+
+
 def render_page():
     with lock:
         recent = list(reports)
@@ -160,6 +233,7 @@ def render_page():
                 f'{last.get("fetch_ok_total", 0)} ok',
                 f'{last.get("fetch_fail_total", 0)} failed this boot',
             ),
+            mirror_card(now),
         ]
     )
 
@@ -324,10 +398,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(data), "application/json")
         if url.path == "/healthz":
             return self._send(200, "ok\n")
+        if url.path == "/gbfs/station_status.json":
+            code, body = mirror_response(url.query)
+            return self._send(code, body, "application/json" if code == 200 else "text/plain")
         return self._send(404, "not found\n")
 
 
 if __name__ == "__main__":
     load()
+    threading.Thread(target=mirror_loop, daemon=True).start()
     print(f"Bay Wheels Log listening on :{PORT}, {len(reports)} reports loaded from {LOG_PATH}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

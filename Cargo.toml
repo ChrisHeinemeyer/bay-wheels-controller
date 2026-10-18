@@ -19,6 +19,10 @@ sleep-trace = ["light-sleep", "embassy-executor/trace"]
 # POST a JSON status report (battery, RSSI, fetch age, reset cause, ...) to
 # LOG_SERVER from .env once per fetch cycle, while the radio is already up.
 log-server = []
+# Fetch station data from the LAN GBFS mirror in the Home Assistant add-on
+# (GBFS_MIRROR in .env), falling back to Lyft over HTTPS if it fails. Skips
+# DNS, TLS and ~270 KB of download per cycle.
+gbfs-mirror = []
 
 [package]
 edition      = "2024"

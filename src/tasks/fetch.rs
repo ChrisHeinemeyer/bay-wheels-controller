@@ -46,7 +46,11 @@ const SUCCESS_GAP: Duration =
 /// waiting on the network and in TLS decryption; `parse_ms` is CPU-only.
 #[derive(Default, Clone, Copy)]
 pub struct FetchTimings {
-    /// DNS + TCP connect + TLS handshake (`client.resource()`).
+    /// Whether the stations came from the LAN mirror (`gbfs-mirror`) rather
+    /// than straight from Lyft.
+    pub from_mirror: bool,
+    /// DNS + TCP connect + TLS handshake (`client.resource()`); TCP connect
+    /// only for the mirror.
     pub handshake_ms: u32,
     /// GET sent → response headers read.
     pub ttfb_ms: u32,
@@ -58,7 +62,7 @@ pub struct FetchTimings {
 }
 
 /// Outcome of one fetch attempt over a freshly-opened connection.
-enum FetchOutcome {
+pub(super) enum FetchOutcome {
     /// Body streamed and parsed successfully.
     Success,
     /// The connection is now in an unknown state (write/read error) — reconnect from scratch.
@@ -98,6 +102,8 @@ pub async fn fetch_task(
 
     let tcp_client = TcpClient::new(*stack, tcp_state);
     let dns_socket = DnsSocket::new(*stack);
+    #[cfg(feature = "gbfs-mirror")]
+    let mirror_path = super::mirror::request_path(STATUS.lock().await.board_id);
 
     // Adaptive TX power, now re-based on successful connect+fetch cycles instead
     // of 5-second maintenance ticks (there's no multi-minute "stable connection"
@@ -192,18 +198,35 @@ pub async fn fetch_task(
         }
 
         let mut timings = FetchTimings::default();
-        let outcome = match with_timeout(
-            FETCH_TIMEOUT,
+        let fetch = async {
+            #[cfg(feature = "gbfs-mirror")]
+            {
+                use super::mirror;
+                match with_timeout(
+                    mirror::MIRROR_TIMEOUT,
+                    mirror::fetch(&tcp_client, &mirror_path, &mut timings),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
+                        timings.from_mirror = true;
+                        return FetchOutcome::Success;
+                    }
+                    Ok(Err(e)) => crate::dprintln!("✗ GBFS mirror: {}; using Lyft", e),
+                    Err(_) => crate::dprintln!("✗ GBFS mirror timed out; using Lyft"),
+                }
+                timings = FetchTimings::default();
+            }
             do_one_fetch(
                 &tcp_client,
                 &dns_socket,
                 tls_read_buffer,
                 tls_write_buffer,
                 &mut timings,
-            ),
-        )
-        .await
-        {
+            )
+            .await
+        };
+        let outcome = match with_timeout(FETCH_TIMEOUT, fetch).await {
             Ok(outcome) => outcome,
             Err(_) => {
                 crate::dprintln!("✗ Fetch timed out after {}s", FETCH_TIMEOUT.as_secs());
@@ -368,8 +391,6 @@ where
     C: embedded_io_async::Read + embedded_io_async::Write,
 {
     let mut headers_buf = [0u8; 1024];
-    let mut station_data: [StationData; STATION_DATA_LEN] =
-        [StationData::default(); STATION_DATA_LEN];
 
     let request = resource
         .get(PATH)
@@ -386,55 +407,78 @@ where
 
     crate::dprintln!("✓ Status: {:?}", response.status);
     timings.ttfb_ms = ms_since(request_start);
-    let body_start = Instant::now();
-    let mut parse_us: u64 = 0;
 
     let mut body_reader = response.body().reader();
-    let mut parser = StreamingStationParser::new(TARGET_STATIONS);
-
+    let mut sink = StationSink::new();
     let mut chunk_buf = [0u8; 1024]; // 1KB chunks
-    let mut total_bytes = 0;
-    let mut stations_found = 0;
 
     use embedded_io_async::Read as _;
 
     // Stream and parse chunks incrementally
     loop {
         match body_reader.read(&mut chunk_buf).await {
-            Ok(0) => {
-                crate::dprintln!("✓ Stream complete! Total: {} bytes", total_bytes);
-                parser.finish();
-                timings.body_ms = ms_since(body_start);
-                timings.parse_ms = (parse_us / 1000) as u32;
-                timings.body_bytes = total_bytes as u32;
-                crate::dprintln!("✓ Found {} matching stations total", stations_found);
-                STATION_DATA_SIGNAL.signal(station_data);
-                STATUS.lock().await.last_fetch_at = Some(Instant::now());
-                FETCH_SIGNAL.signal(Instant::now());
-                return FetchOutcome::Success;
-            }
-            Ok(n) => {
-                total_bytes += n;
-                // Parse this chunk incrementally
-                let parse_start = Instant::now();
-                if let Ok(chunk_str) = core::str::from_utf8(&chunk_buf[..n]) {
-                    let stations = parser.process_chunk(chunk_str);
-                    stations_found += stations.len();
-
-                    for station in stations.iter() {
-                        if (station.station_idx as usize) < STATION_DATA_LEN {
-                            station_data[station.station_idx as usize] = *station;
-                        }
-                    }
-                    parse_us += Instant::now().duration_since(parse_start).as_micros();
-                } else {
-                    crate::dprintln!("  Warning: Invalid UTF-8 in chunk");
-                }
-            }
+            Ok(0) => return sink.finish(timings).await,
+            Ok(n) => sink.feed(&chunk_buf[..n]),
             Err(e) => {
                 crate::dprintln!("✗ Error reading: {:?}", e);
                 return FetchOutcome::ConnectionLost;
             }
         }
+    }
+}
+
+/// Streams a station_status body through the parser, then publishes the
+/// result. Shared by the direct HTTPS fetch and the LAN mirror.
+pub(super) struct StationSink {
+    parser: StreamingStationParser,
+    station_data: [StationData; STATION_DATA_LEN],
+    started: Instant,
+    total_bytes: usize,
+    stations_found: usize,
+    parse_us: u64,
+}
+
+impl StationSink {
+    pub(super) fn new() -> Self {
+        Self {
+            parser: StreamingStationParser::new(TARGET_STATIONS),
+            station_data: [StationData::default(); STATION_DATA_LEN],
+            started: Instant::now(),
+            total_bytes: 0,
+            stations_found: 0,
+            parse_us: 0,
+        }
+    }
+
+    pub(super) fn feed(&mut self, chunk: &[u8]) {
+        self.total_bytes += chunk.len();
+        let parse_start = Instant::now();
+        if let Ok(chunk_str) = core::str::from_utf8(chunk) {
+            let stations = self.parser.process_chunk(chunk_str);
+            self.stations_found += stations.len();
+
+            for station in stations.iter() {
+                if (station.station_idx as usize) < STATION_DATA_LEN {
+                    self.station_data[station.station_idx as usize] = *station;
+                }
+            }
+            self.parse_us += Instant::now().duration_since(parse_start).as_micros();
+        } else {
+            crate::dprintln!("  Warning: Invalid UTF-8 in chunk");
+        }
+    }
+
+    /// The body ended cleanly: hand the stations to the LED task.
+    pub(super) async fn finish(mut self, timings: &mut FetchTimings) -> FetchOutcome {
+        crate::dprintln!("✓ Stream complete! Total: {} bytes", self.total_bytes);
+        self.parser.finish();
+        timings.body_ms = ms_since(self.started);
+        timings.parse_ms = (self.parse_us / 1000) as u32;
+        timings.body_bytes = self.total_bytes as u32;
+        crate::dprintln!("✓ Found {} matching stations total", self.stations_found);
+        STATION_DATA_SIGNAL.signal(self.station_data);
+        STATUS.lock().await.last_fetch_at = Some(Instant::now());
+        FETCH_SIGNAL.signal(Instant::now());
+        FetchOutcome::Success
     }
 }

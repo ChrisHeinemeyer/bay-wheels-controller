@@ -12,6 +12,9 @@ fn main() {
     if std::env::var("CARGO_FEATURE_LOG_SERVER").is_ok() {
         load_log_server();
     }
+    if std::env::var("CARGO_FEATURE_GBFS_MIRROR").is_ok() {
+        load_gbfs_mirror();
+    }
 }
 
 /// Embed git tag and commit (e.g. v1.0.1-abe59403-dirty) into the firmware.
@@ -77,6 +80,15 @@ fn load_log_server() {
     addr.parse::<std::net::SocketAddrV4>()
         .unwrap_or_else(|e| panic!("log-server: LOG_SERVER {addr:?} is not ip:port: {e}"));
     println!("cargo:rustc-env=LOG_SERVER={}", addr);
+}
+
+fn load_gbfs_mirror() {
+    let vars = read_env_file("gbfs-mirror");
+    let addr = env_value(&vars, "GBFS_MIRROR")
+        .expect("gbfs-mirror: GBFS_MIRROR (e.g. \"10.0.0.107:8099\") not found in .env");
+    addr.parse::<std::net::SocketAddrV4>()
+        .unwrap_or_else(|e| panic!("gbfs-mirror: GBFS_MIRROR {addr:?} is not ip:port: {e}"));
+    println!("cargo:rustc-env=GBFS_MIRROR={}", addr);
 }
 
 /// Parses `src/stations.rs` and emits `web/src/generated/station-ids.ts`.

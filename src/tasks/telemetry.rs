@@ -163,7 +163,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
          \"heap_prev_after_teardown\":{},\"heap_cycle_start\":{},\"heap_after_start\":{},\
          \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{},\
          \"sleep_cfg\":{},\"min_nap_us\":{},\"handshake_ms\":{},\"ttfb_ms\":{},\
-         \"body_ms\":{},\"parse_ms\":{},\"body_bytes\":{}",
+         \"body_ms\":{},\"parse_ms\":{},\"body_bytes\":{},\"src\":\"{}\"",
         cycle.connect_ms,
         cycle.dhcp_ms,
         cycle.fetch_ms,
@@ -187,6 +187,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         cycle.timings.body_ms,
         cycle.timings.parse_ms,
         cycle.timings.body_bytes,
+        if cycle.timings.from_mirror { "mirror" } else { "lyft" },
     );
 
     let mut summary = heapless::String::<256>::new();
