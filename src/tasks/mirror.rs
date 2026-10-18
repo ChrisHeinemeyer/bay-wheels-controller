@@ -246,8 +246,12 @@ impl Probe {
     }
 }
 
-/// How often `wait_for_downlink` probes while the radio dozes.
-const DOZE_PROBE_INTERVAL: Duration = Duration::from_millis(100);
+/// How often `wait_for_downlink` probes while the radio dozes. Each send or
+/// receive keeps the radio awake for a while, so probing too often leaves no
+/// time to doze (at 100 ms the radio barely slept).
+const DOZE_PROBE_INTERVAL: Duration = Duration::from_millis(
+    crate::power::parse_u32(option_env!("DOZE_PROBE_MS"), 500) as u64,
+);
 
 /// Probes the mirror host until an echo comes back, i.e. until unicast toward
 /// us gets through, or `limit` passes. Meant to run with WiFi power save on,
