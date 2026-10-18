@@ -132,6 +132,12 @@ fix works: chip-disable when idle (`LED_IDLE=1`) or set Power_Save_EN at init
 (`AL5887_POWER_SAVE=1`). LED touch/release/re-touch verified by hand on
 `led-idle-2`.
 
+**Now the default:** `init_driver` always sets Power_Save_EN, and `LED_IDLE`
+defaults to 1 (the `AL5887_POWER_SAVE` knob is gone). Verified on the PPK2:
+floor 2.83mA with the cable in (≈2.64mA without). `build-step1.sh`'s
+`baseline` is now this build; the v1.4.0 run is kept as
+`target/step1/v140-baseline.*`.
+
 New split (cable out, estimated): floor ~2.64mA = **board ~1.35-1.5mA**
 (regulator, battery divider, pull-ups, leakage; the deep-sleep reading includes
 some of the cable's 0.17mA) + **ESP32-S3 light sleep ~1.1-1.3mA** (datasheet

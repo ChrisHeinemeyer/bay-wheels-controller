@@ -86,13 +86,15 @@ pub async fn station_leds_task(mut al5887: Al5887<'static>) {
 }
 
 /// What the AL5887 does while no station is touched, from the `LED_IDLE`
-/// build env var (default 0). Sleep-Floor-Plan.md step 1 measures each.
-/// - 0: chip-disabled on touch release, but left enabled (active, all LEDs
-///   off) from boot until the first touch.
+/// build env var (default 1). Sleep-Floor-Plan.md step 1 measures each; with
+/// the driver's power-saving mode on (`Al5887::init_driver`) all three draw the
+/// same.
+/// - 0: chip-disabled on touch release, but left enabled (all LEDs off) from
+///   boot until the first touch.
 /// - 1: also chip-disabled from boot.
 /// - 2: as 1, plus LED_EN low (hardware shutdown); re-initialised on the next
 ///   touch.
-const LED_IDLE: u32 = crate::power::parse_u32(option_env!("LED_IDLE"), 0);
+const LED_IDLE: u32 = crate::power::parse_u32(option_env!("LED_IDLE"), 1);
 
 /// Blanks the display with no station selected.
 async fn go_idle(al5887: &mut Al5887<'static>) {

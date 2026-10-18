@@ -12,13 +12,10 @@ use crate::{
     spi_devices::al5887::enums::{Color, ColorChannel},
     tasks::station_leds::MAX_LEDS,
 };
-/// `AL5887_POWER_SAVE=1` build env var: set Power_Save_EN at init. DEVICE_CONFIG1
-/// resets to 0xAE, which has it off, so a chip-enabled AL5887 with every LED
-/// off stays in normal mode (~1.5mA on the PPK2) instead of the 15µA
-/// power-saving mode.
-const POWER_SAVE: bool = crate::power::parse_u32(option_env!("AL5887_POWER_SAVE"), 0) != 0;
 /// DEVICE_CONFIG1 reset value 0xAE (Phase_Shift_EN, Log_Scale_EN, Dither_EN,
-/// Max_Current_Option) plus Power_Save_EN (bit 4).
+/// Max_Current_Option) plus Power_Save_EN (bit 4). The reset value has it off,
+/// so a chip-enabled AL5887 with every LED off stayed in normal mode (~1.5mA on
+/// the PPK2) instead of the 15µA power-saving mode (Sleep-Floor-Plan.md).
 const DEVICE_CONFIG1_POWER_SAVE: u8 = 0xAE | 1 << 4;
 
 #[derive(Copy, Clone)]
@@ -123,14 +120,12 @@ impl<'d> Al5887<'d> {
         self.led_rst_n.set_low();
         Timer::after(Duration::from_millis(1)).await;
         self.led_rst_n.set_high();
-        if POWER_SAVE {
-            self.write_register(SpiFrame::new(
-                Register::DeviceConfig1,
-                DEVICE_CONFIG1_POWER_SAVE,
-                true,
-            ))
-            .await?;
-        }
+        self.write_register(SpiFrame::new(
+            Register::DeviceConfig1,
+            DEVICE_CONFIG1_POWER_SAVE,
+            true,
+        ))
+        .await?;
         self.set_chip_enable(true).await?;
         Ok(())
     }

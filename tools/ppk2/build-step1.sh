@@ -18,11 +18,10 @@ VARIANTS=(
   "baseline:"
   "deep-al5887-standby:DEEP_SLEEP_TEST=1"
   "deep-al5887-shutdown:DEEP_SLEEP_TEST=2"
-  "led-idle-1:LED_IDLE=1"
+  "led-idle-0:LED_IDLE=0"
   "led-idle-2:LED_IDLE=2"
-  "power-save:AL5887_POWER_SAVE=1"
-  "vddsdio-pd:LED_IDLE=1 SLEEP_VDDSDIO_PD=1"
-  "rtc-peri-pd:LED_IDLE=1 SLEEP_RTC_PERI_PD=1"
+  "vddsdio-pd:SLEEP_VDDSDIO_PD=1"
+  "rtc-peri-pd:SLEEP_RTC_PERI_PD=1"
 )
 
 mkdir -p "$OUT"
