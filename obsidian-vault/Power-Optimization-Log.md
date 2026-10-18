@@ -90,3 +90,33 @@ work. What's known:
 
 **Next:** awake time is the largest part. ~11% of the time the CPU is up at
 ~46mA with the radio off, mostly short wakes between naps.
+
+## Awake time (rounds 18-20)
+
+From round 14's 1ms bins, between fetches the CPU wakes **16.4/s**: ~12/s
+wakes of 4-5ms and ~3.3/s of 13-15ms. Every wake costs at least ~4ms
+because a nap ends `WAKE_MARGIN_US` (2ms) before the alarm and the CPU then
+waits awake for it (`near_deadline_waits`).
+
+Telemetry (`sleep-trace`) now reports what wakes the CPU while asleep:
+`timer_wakes_total`, `armed_total` (armed timer lengths), and with
+`sleep-trace` the per-task embassy polls, radio timer callbacks by address
+(`radio_timers`) and timed sleeps per esp-rtos thread (`thread_sleeps`). Task
+order: 0 main, 1 net, 2 battery, 3 LEDs, 4 fetch, 5 input, 6 serial.
+
+| Round | Change | Result |
+|---|---|---|
+| 18 | Wake-source telemetry | Steady state ~18 nap wakes/s, ~7/s from embassy tasks: LEDs ~4.4/s, input ~2.2/s, serial ~0.5/s. The input task signalled the LED task every 500ms poll even with no change, and each signal cost two LED wakes. |
+| 19 | **LED fix** (signal only on change) + **WiFi de-init between cycles** (drop the `WifiController`, re-create it with `esp_radio::wifi::new` from the leaked radio init) | Crash-looped: embassy-net answered a frame left in the RX queue after the drop, and `esp_wifi_internal_tx` jumped into the de-initialised driver (LoadProhibited, PC 0x10). |
+| 19b | Same, clearing the IPv4 config and draining RX for 50ms before the drop | Stable, heap steady at 56.8KB after teardown. LED task no longer polled while asleep; embassy wakes ~2.7/s. **Zero radio timer callbacks while asleep**, yet still **~14 nap wakes/s**. Every cycle cold-starts the radio: connect ~1.9s (was ~0.1s), radio on ~4s per cycle. **13.9mA, worse** than round 14 (9.6-11.9mA). De-init removed. |
+| 20 | Count timed sleeps per esp-rtos thread (entry function address) | Running. |
+
+**Lessons:**
+- The leftover ~11 wakes/s are not the WiFi blob's ets timers; something
+  else sets the alarm. Round 20 counts which esp-rtos thread sleeps with a
+  timeout.
+- Re-initialising the radio costs ~1.8s of extra radio time per cycle (PHY
+  calibration and full authentication). It could only pay off at much longer
+  fetch gaps.
+- Before ever dropping the WiFi driver again, stop embassy-net from
+  transmitting into it (clear the IP config and drain RX), or it crashes.
