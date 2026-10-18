@@ -212,6 +212,20 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
             sleep.executor_wakes
         );
         push_json_array(out, &sleep.task_polls);
+        // Radio (WiFi blob) timer callbacks fired while asleep, by address.
+        let (slots, (other, passes, empty)) = esp_rtos::radio_timer_stats::snapshot();
+        let _ = out.push_str(",\"radio_timers\":{");
+        let mut first = true;
+        for (func, fires) in slots.iter().filter(|(f, _)| *f != 0) {
+            let sep = if first { "" } else { "," };
+            let _ = write!(out, "{sep}\"{func:#010x}\":{fires}");
+            first = false;
+        }
+        let _ = write!(
+            out,
+            "}},\"radio_timer_other\":{other},\"radio_timer_passes\":{passes},\
+             \"radio_timer_empty_passes\":{empty}"
+        );
     }
 
     let mut summary = heapless::String::<256>::new();

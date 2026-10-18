@@ -85,6 +85,9 @@ mod fmt;
 
 #[cfg(feature = "esp-radio")]
 mod esp_radio;
+// PATCHED (bay-wheels-controller): radio timer counters for power work.
+#[cfg(feature = "esp-radio")]
+pub use esp_radio::radio_timer_stats;
 mod run_queue;
 mod scheduler;
 pub mod semaphore;

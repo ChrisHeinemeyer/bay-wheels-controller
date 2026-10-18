@@ -116,6 +116,7 @@ impl TimerQueue {
             q.next_wakeup = u64::MAX;
             q.head.take()
         });
+        let mut fired_any = false;
 
         while let Some(current) = timers {
             debug!("Checking timer: {:x}", current.addr());
@@ -152,6 +153,8 @@ impl TimerQueue {
             });
 
             if run_callback {
+                fired_any = true;
+                stats::record_fire(current_timer.func);
                 debug!("Triggering timer: {:x}", current_timer as *const _ as usize);
                 (current_timer.callback.borrow_mut())();
             }
@@ -179,6 +182,8 @@ impl TimerQueue {
                 }
             });
         }
+
+        stats::record_pass(fired_any);
 
         self.inner.with(|q| {
             let next_wakeup = q.next_wakeup;
@@ -213,6 +218,8 @@ impl<T> TimerQueueCell<T> {
 
 pub struct Timer {
     callback: RefCell<Box<dyn FnMut() + Send>>,
+    /// PATCHED (bay-wheels-controller): the C callback's address, for `stats`.
+    func: usize,
     // Timer properties, not available in `callback` due to how the timer is constructed.
     timer_properties: TimerQueueCell<TimerProperties>,
 }
@@ -221,6 +228,7 @@ impl Timer {
     pub fn new(callback: Box<dyn FnMut() + Send>) -> Self {
         Timer {
             callback: RefCell::new(callback),
+            func: 0,
             timer_properties: TimerQueueCell::new(TimerProperties {
                 is_active: false,
                 next_due: 0,
@@ -283,7 +291,9 @@ impl TimerImplementation for Timer {
 
         let mut callback = CCallback { func, data };
 
-        let timer = Box::new(Timer::new(Box::new(move || unsafe { callback.call() })));
+        let func_addr = func as usize;
+        let mut timer = Box::new(Timer::new(Box::new(move || unsafe { callback.call() })));
+        timer.func = func_addr;
         let ptr = NonNull::from(Box::leak(timer)).cast();
         debug!("Created timer: {:x}", ptr.addr());
         ptr
@@ -349,5 +359,72 @@ register_timer_implementation!(Timer);
 pub(crate) extern "C" fn timer_task(_: *mut c_void) {
     loop {
         TIMER_QUEUE.process();
+    }
+}
+
+/// PATCHED (bay-wheels-controller): counts timer callbacks by C function
+/// address while `ENABLED`, to find which radio timers keep waking the CPU
+/// once the radio is stopped. Map the addresses to symbols with the ELF.
+pub mod stats {
+    use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+
+    /// Distinct callback functions tracked.
+    pub const SLOTS: usize = 16;
+
+    /// Count only while set (the firmware sets it while light-sleeping).
+    pub static ENABLED: AtomicBool = AtomicBool::new(false);
+    static FUNCS: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
+    static FIRES: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+    /// Fires whose function didn't fit in the table.
+    static OTHER: AtomicU32 = AtomicU32::new(0);
+    /// `process()` passes, and those that ran no callback (e.g. woken for a
+    /// timer that was disarmed before it was due).
+    static PASSES: AtomicU32 = AtomicU32::new(0);
+    static EMPTY_PASSES: AtomicU32 = AtomicU32::new(0);
+
+    pub(super) fn record_fire(func: usize) {
+        if !ENABLED.load(Ordering::Relaxed) {
+            return;
+        }
+        for i in 0..SLOTS {
+            let cur = FUNCS[i].load(Ordering::Relaxed);
+            if cur == func
+                || (cur == 0
+                    && FUNCS[i]
+                        .compare_exchange(0, func, Ordering::Relaxed, Ordering::Relaxed)
+                        .map_or_else(|v| v == func, |_| true))
+            {
+                FIRES[i].fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        }
+        OTHER.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_pass(fired_any: bool) {
+        if !ENABLED.load(Ordering::Relaxed) {
+            return;
+        }
+        PASSES.fetch_add(1, Ordering::Relaxed);
+        if !fired_any {
+            EMPTY_PASSES.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// `(function address, fires)` per slot (unused slots are `(0, 0)`), plus
+    /// (fires of other functions, passes, empty passes). Totals since boot.
+    pub fn snapshot() -> ([(usize, u32); SLOTS], (u32, u32, u32)) {
+        let mut out = [(0, 0); SLOTS];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = (FUNCS[i].load(Ordering::Relaxed), FIRES[i].load(Ordering::Relaxed));
+        }
+        (
+            out,
+            (
+                OTHER.load(Ordering::Relaxed),
+                PASSES.load(Ordering::Relaxed),
+                EMPTY_PASSES.load(Ordering::Relaxed),
+            ),
+        )
     }
 }

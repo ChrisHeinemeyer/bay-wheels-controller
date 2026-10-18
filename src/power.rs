@@ -344,6 +344,8 @@ mod inner {
                 if !state.sleeping {
                     state.sleeping = true;
                     super::SLEEPING.store(true, Ordering::Relaxed);
+                    #[cfg(feature = "sleep-trace")]
+                    esp_rtos::radio_timer_stats::ENABLED.store(true, Ordering::Relaxed);
                     // SYSTIMER is only advanced by estimate while asleep, so
                     // each awake stretch calibrates from scratch.
                     state.cal_anchor = None;
@@ -371,6 +373,8 @@ mod inner {
     fn end_sleeping(state: &mut State, reason: &str) {
         state.sleeping = false;
         super::SLEEPING.store(false, Ordering::Relaxed);
+        #[cfg(feature = "sleep-trace")]
+        esp_rtos::radio_timer_stats::ENABLED.store(false, Ordering::Relaxed);
         {
             let s = &state.stats;
             let rc_scale_ppm = state.rtc_scale_ppm as u32;
