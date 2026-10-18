@@ -175,9 +175,14 @@ async fn main(spawner: Spawner) -> ! {
     // Initialize WiFi radio
     let radio_init_value = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
     let radio_init: &'static _ = Box::leak(Box::new(radio_init_value));
-    let (controller, interfaces) =
-        esp_radio::wifi::new(radio_init, peripherals.WIFI, Default::default())
-            .expect("Failed to initialize Wi-Fi controller");
+    // AMPDU_RX=0 (build-time) turns off A-MPDU receive, so the AP can't set up
+    // a downlink Block Ack session: an experiment for the 1-3 s after each
+    // re-association in which the AP loops on Block Ack Requests.
+    let wifi_config = esp_radio::wifi::Config::default().with_ampdu_rx_enable(
+        bay_wheels_controller::power::parse_u32(option_env!("AMPDU_RX"), 1) != 0,
+    );
+    let (controller, interfaces) = esp_radio::wifi::new(radio_init, peripherals.WIFI, wifi_config)
+        .expect("Failed to initialize Wi-Fi controller");
     let ssid: &'static str = Box::leak(ssid.into_boxed_str());
     let password: &'static str = Box::leak(password.into_boxed_str());
 
