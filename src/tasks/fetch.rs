@@ -48,6 +48,10 @@ const SUCCESS_GAP: Duration =
 /// Build-time pause between the WiFi disconnect and stopping the radio.
 const TEARDOWN_WAIT_MS: u32 = crate::power::parse_u32(option_env!("TEARDOWN_WAIT_MS"), 0);
 
+/// DEAUTH=0 (build-time) stops the radio without disconnecting first
+/// (experiment: leave the AP's session in place for the next connect).
+const DEAUTH: bool = crate::power::parse_u32(option_env!("DEAUTH"), 1) != 0;
+
 /// GARP=0 (build-time) skips the gratuitous ARP after each connect.
 const GARP: bool = crate::power::parse_u32(option_env!("GARP"), 1) != 0;
 
@@ -344,7 +348,9 @@ pub async fn fetch_task(
 /// Disconnects and stops the radio, tolerating "already stopped".
 async fn teardown(controller: &mut WifiController<'static>) {
     if controller.is_started().unwrap_or(false) {
-        let _ = controller.disconnect_async().await;
+        if DEAUTH {
+            let _ = controller.disconnect_async().await;
+        }
         // Give the deauth frame time to actually go out before the radio
         // stops, so the AP drops this association instead of holding stale
         // state when we come back (experiment).
