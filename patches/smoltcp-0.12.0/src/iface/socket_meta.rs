@@ -43,7 +43,11 @@ impl Meta {
     /// socket, in milliseconds.
     ///
     /// See also `iface::NeighborCache::SILENT_TIME`.
-    pub(crate) const DISCOVERY_SILENT_TIME: Duration = Duration::from_millis(1_000);
+    ///
+    /// PATCHED (bay-wheels-controller): 1 s upstream. A lost ARP exchange right
+    /// after re-association held the socket's queued packets for a whole
+    /// second of radio-on time.
+    pub(crate) const DISCOVERY_SILENT_TIME: Duration = Duration::from_millis(200);
 
     pub(crate) fn poll_at<F>(&self, socket_poll_at: PollAt, has_neighbor: F) -> PollAt
     where

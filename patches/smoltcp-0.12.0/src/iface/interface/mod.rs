@@ -364,8 +364,15 @@ impl Interface {
     /// # Panics
     /// This function panics if any of the addresses are not unicast.
     pub fn update_ip_addrs<F: FnOnce(&mut Vec<IpCidr, IFACE_MAX_ADDR_COUNT>)>(&mut self, f: F) {
+        // PATCHED (bay-wheels-controller): flush the neighbor cache only when
+        // the addresses actually change. embassy-net re-applies the same
+        // static config on every reconnect, and the flush made each fetch
+        // cycle start by ARPing for the mirror host again.
+        let before = self.inner.ip_addrs.clone();
         f(&mut self.inner.ip_addrs);
-        InterfaceInner::flush_neighbor_cache(&mut self.inner);
+        if self.inner.ip_addrs != before {
+            InterfaceInner::flush_neighbor_cache(&mut self.inner);
+        }
         InterfaceInner::check_ip_addrs(&self.inner.ip_addrs);
 
         #[cfg(all(feature = "proto-ipv6", feature = "multicast"))]
