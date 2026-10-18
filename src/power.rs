@@ -117,6 +117,16 @@ pub struct SleepTotals {
     pub spurious_ext0: u32,
     /// Latest RC_SLOW calibration (real µs per million nominal); 0 if none.
     pub rc_scale_ppm: u32,
+    /// Naps ended by the timer (rather than GPIO2).
+    pub timer_wakes: u32,
+    /// Newly armed scheduler timers while asleep, by length: <=2, 10, 20, 50,
+    /// 100, 300, 1000 ms, longer. The dominant bucket is the period of
+    /// whatever keeps waking the CPU.
+    pub armed: [u32; 8],
+    /// `sleep-trace` only: embassy executor wakes while asleep, and task polls
+    /// by spawn order (0 = `main`, then the `spawner.spawn` calls in `main.rs`).
+    pub executor_wakes: u32,
+    pub task_polls: [u32; 10],
 }
 
 static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
@@ -126,6 +136,10 @@ static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
         near_deadline_waits: 0,
         spurious_ext0: 0,
         rc_scale_ppm: 0,
+        timer_wakes: 0,
+        armed: [0; 8],
+        executor_wakes: 0,
+        task_polls: [0; 10],
     }));
 
 /// Totals up to the end of the last sleeping stretch.
@@ -368,6 +382,18 @@ mod inner {
                 t.near_deadline_waits += s.near_deadline;
                 t.spurious_ext0 += s.spurious_ext0;
                 t.rc_scale_ppm = rc_scale_ppm;
+                t.timer_wakes += s.timer_wakes;
+                for (total, n) in t.armed.iter_mut().zip(s.armed) {
+                    *total += n;
+                }
+                #[cfg(feature = "sleep-trace")]
+                {
+                    let (polls, wakes) = super::trace::peek();
+                    t.executor_wakes += wakes;
+                    for (total, n) in t.task_polls.iter_mut().zip(polls) {
+                        *total += n;
+                    }
+                }
                 cell.set(t);
             });
         }
@@ -671,6 +697,15 @@ mod trace {
         polls: [0; MAX_TASKS],
         wakes: 0,
     }));
+
+    /// Per-task poll counts and executor wakes since the last `take`, without
+    /// resetting them.
+    pub fn peek() -> ([u32; MAX_TASKS], u32) {
+        critical_section::with(|cs| {
+            let t = TRACE.borrow_ref(cs);
+            (t.polls, t.wakes)
+        })
+    }
 
     /// Per-task poll counts and executor wakes since the last call.
     pub fn take() -> ([u32; MAX_TASKS], u32) {

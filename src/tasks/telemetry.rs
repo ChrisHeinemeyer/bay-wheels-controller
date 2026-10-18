@@ -197,6 +197,14 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         if cycle.lease_reused { "reused" } else { "dhcp" },
         smoltcp::socket::dhcpv4::LAST_LEASE_SECS.load(core::sync::atomic::Ordering::Relaxed),
     );
+    // What wakes the CPU while asleep (totals since boot; see `SleepTotals`).
+    let _ = write!(out, ",\"timer_wakes_total\":{},\"armed_total\":", sleep.timer_wakes);
+    push_json_array(out, &sleep.armed);
+    #[cfg(feature = "sleep-trace")]
+    {
+        let _ = write!(out, ",\"executor_wakes_total\":{},\"task_polls_total\":", sleep.executor_wakes);
+        push_json_array(out, &sleep.task_polls);
+    }
 
     let mut summary = heapless::String::<256>::new();
     let has_reset_summary = watchdog::pending_reset_summary(&mut summary);
@@ -216,6 +224,14 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
     }
     let _ = out.push('}');
     has_reset_summary
+}
+
+fn push_json_array<const N: usize>(out: &mut heapless::String<N>, values: &[u32]) {
+    let _ = out.push('[');
+    for (i, v) in values.iter().enumerate() {
+        let _ = write!(out, "{}{}", if i == 0 { "" } else { "," }, v);
+    }
+    let _ = out.push(']');
 }
 
 fn push_json_escaped<const N: usize>(out: &mut heapless::String<N>, s: &str) {
