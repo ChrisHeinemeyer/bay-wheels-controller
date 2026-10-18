@@ -28,7 +28,7 @@ import sys
 import time
 
 import click
-from ppk2_api.ppk2_api import PPK2_MP
+from ppk2_api.ppk2_api import PPK2_API, PPK2_MP
 
 BIN_SAMPLES = 100  # 100 kS/s -> 1 ms bins
 
@@ -42,7 +42,18 @@ def find_port():
 
 def open_ppk(port, mv):
     ppk = PPK2_MP(port or find_port(), timeout=1, write_timeout=1, exclusive=True)
-    ppk.get_modifiers()
+    # A run killed mid-measurement leaves the PPK2 streaming samples, which
+    # then garble the metadata read. Stop it and drain before asking.
+    for attempt in range(5):
+        PPK2_API.stop_measuring(ppk)
+        time.sleep(0.2)
+        ppk.ser.reset_input_buffer()
+        try:
+            ppk.get_modifiers()
+            break
+        except (UnicodeDecodeError, ValueError):
+            if attempt == 4:
+                raise
     ppk.use_source_meter()
     ppk.set_source_voltage(mv)
     return ppk

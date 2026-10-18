@@ -129,6 +129,15 @@ pub async fn fetch_task(
             heap_steps.after_start = heap();
         }
 
+        // Modem power save off for the whole radio window: MAX_MODEM's ~1s
+        // sleep windows cause DNS UDP replies and TLS handshake packets to be
+        // dropped (see git history). It's set before connecting so the AP never
+        // sees this station as dozing: switched off only after association, the
+        // AP still buffered the DHCP OFFER until the next ~1s wake, and
+        // `dhcp_ms` came out in whole seconds (1.25s, 2.25s, ...). The radio is
+        // fully stopped between cycles, so there is no idle phase to save in.
+        let _ = controller.set_power_saving(PowerSaveMode::None);
+
         let connected_rssi = match wifi_connect::connect(&mut controller, tx_power).await {
             Ok(rssi) => rssi,
             Err(e) => {
@@ -146,13 +155,6 @@ pub async fn fetch_task(
         {
             heap_steps.after_connect = heap();
         }
-
-        // Disable modem power save for DHCP + the TLS handshake: MAX_MODEM's ~1s
-        // sleep windows cause DNS UDP replies and TLS handshake packets to be
-        // dropped (see git history). The radio is fully stopped after this
-        // cycle's fetch anyway, so there's no "leave modem-sleep on between
-        // fetches" phase to manage anymore — just make sure PS is off for now.
-        let _ = controller.set_power_saving(PowerSaveMode::None);
 
         let dhcp_ok = with_timeout(DHCP_TIMEOUT, stack.wait_config_up())
             .await
