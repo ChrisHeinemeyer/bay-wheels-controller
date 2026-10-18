@@ -121,8 +121,7 @@ pub fn recreate(
     // SAFETY: the WIFI peripheral's only other owner was the controller just
     // dropped; there is never more than one controller at a time.
     let wifi = unsafe { esp_hal::peripherals::WIFI::steal() };
-    let (mut controller, _interfaces) =
-        esp_radio::wifi::new(radio_init, wifi, Default::default())?;
+    let (mut controller, _interfaces) = esp_radio::wifi::new(radio_init, wifi, Default::default())?;
     controller.set_mode(esp_radio::wifi::WifiMode::Sta)?;
     configure(&mut controller, ssid, password, ap)?;
     Ok(controller)

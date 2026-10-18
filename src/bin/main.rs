@@ -282,7 +282,9 @@ async fn main(spawner: Spawner) -> ! {
         .spawn(station_leds::station_leds_task(al5887))
         .expect("Failed to spawn station_leds_task");
     spawner
-        .spawn(fetch::fetch_task(stack, radio_init, controller, ssid, password))
+        .spawn(fetch::fetch_task(
+            stack, radio_init, controller, ssid, password,
+        ))
         .expect("Failed to spawn fetch_task");
     spawner
         .spawn(input_read::input_read_task(shift_register, board_id))
