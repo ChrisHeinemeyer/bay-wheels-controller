@@ -2,7 +2,7 @@ use super::station_parser::StreamingStationParser;
 use super::wifi_connect;
 use core::sync::atomic::Ordering;
 use embassy_net::{
-    Stack,
+    ConfigV4, Stack, StaticConfigV4,
     dns::DnsSocket,
     tcp::client::{TcpClient, TcpClientState},
 };
@@ -34,6 +34,9 @@ const TCP_TX_SIZE: usize = 4096;
 /// its own, so a server that stalls mid-body would otherwise hold the radio on
 /// until the watchdog's fetch-stall reset.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(90);
+/// Reuse the last DHCP lease across cycles until its renewal time T1 (see the
+/// lease handling in `fetch_task`). `DHCP_REUSE=0` at build time turns that off.
+const DHCP_REUSE: bool = crate::power::parse_u32(option_env!("DHCP_REUSE"), 1) != 0;
 /// Gap after any failed cycle (start/connect/DHCP/fetch) before retrying.
 const RETRY_GAP: Duration = Duration::from_secs(60);
 /// Gap after a successful fetch before the next cycle — the radio is stopped for
@@ -110,6 +113,9 @@ pub async fn fetch_task(
     // clock left once the radio is torn down every cycle). See wifi_connect.rs.
     let mut tx_power = TX_POWER_FIXED.unwrap_or(wifi_connect::TX_POWER_MAX);
     let mut success_streak: u32 = 0;
+    // The last DHCP lease and when to stop reusing it. Cleared on any failure
+    // so the next cycle asks DHCP again.
+    let mut lease: Option<(StaticConfigV4, Instant)> = None;
     #[cfg(feature = "log-server")]
     let (mut fetch_ok_total, mut fetch_fail_total, mut prev_radio_on_ms) = (0u32, 0u32, 0u32);
     // Free heap after the previous cycle's teardown (radio stopped, nothing
@@ -141,6 +147,7 @@ pub async fn fetch_task(
                 crate::dprintln!("✗ WiFi start failed: {:?}", e);
                 RADIO_ACTIVE.store(controller.is_started().unwrap_or(true), Ordering::Release);
                 reset_tx_power(&mut tx_power, &mut success_streak);
+                lease = None;
                 Timer::after(RETRY_GAP).await;
                 continue;
             }
@@ -159,12 +166,28 @@ pub async fn fetch_task(
         // fully stopped between cycles, so there is no idle phase to save in.
         let _ = controller.set_power_saving(PowerSaveMode::None);
 
+        // Skip DHCP by reusing the last lease until its renewal time. embassy-net
+        // restarts DHCP on every link-up, and every cycle's DHCP took 1-2.5s:
+        // most of the radio window once the fetch is the ~50ms LAN mirror.
+        // Past T1 (when RFC 2131 says to renew) a real DHCP runs again.
+        let lease_reused = match &lease {
+            Some((cfg, reuse_until)) if Instant::now() < *reuse_until => {
+                stack.set_config_v4(ConfigV4::Static(cfg.clone()));
+                true
+            }
+            _ => {
+                stack.set_config_v4(crate::network::dhcp_config().ipv4);
+                false
+            }
+        };
+
         let connected_rssi = match wifi_connect::connect(&mut controller, tx_power).await {
             Ok(rssi) => rssi,
             Err(e) => {
                 crate::dprintln!("✗ WiFi connect failed: {:?}", e);
                 teardown(&mut controller).await;
                 reset_tx_power(&mut tx_power, &mut success_streak);
+                lease = None;
                 STATUS.lock().await.wifi_connected = false;
                 Timer::after(RETRY_GAP).await;
                 continue;
@@ -184,12 +207,16 @@ pub async fn fetch_task(
             crate::dprintln!("✗ DHCP timed out");
             teardown(&mut controller).await;
             reset_tx_power(&mut tx_power, &mut success_streak);
+            lease = None;
             STATUS.lock().await.wifi_connected = false;
             Timer::after(RETRY_GAP).await;
             continue;
         }
         if let Some(config) = stack.config_v4() {
             crate::dprintln!("Network is up! IP: {}", config.address);
+            if DHCP_REUSE && !lease_reused {
+                lease = lease_reuse_until().map(|until| (config, until));
+            }
         }
         let dhcp_at = Instant::now();
         #[cfg(feature = "log-server")]
@@ -254,6 +281,7 @@ pub async fn fetch_task(
                 prev_radio_on_ms,
                 heap: heap_steps,
                 timings,
+                lease_reused,
             };
             super::telemetry::send_report(&tcp_client, &report).await;
         }
@@ -281,6 +309,7 @@ pub async fn fetch_task(
             }
             FetchOutcome::ConnectionLost => {
                 reset_tx_power(&mut tx_power, &mut success_streak);
+                lease = None;
                 crate::dprintln!("Reconnecting in {}s...", RETRY_GAP.as_secs());
                 RETRY_GAP
             }
@@ -375,6 +404,16 @@ async fn do_one_fetch(
 
     crate::dprintln!("=== Fetching {} ===", PATH);
     fetch_once(&mut resource, timings).await
+}
+
+/// When to stop reusing the lease just obtained: 90% of its T1, published by
+/// the patched smoltcp (`patches/smoltcp-0.12.0`). The margin covers clock
+/// drift across light sleep. `None` without a lease time worth reusing.
+fn lease_reuse_until() -> Option<Instant> {
+    use smoltcp::socket::dhcpv4::LAST_RENEW_SECS;
+    let t1_s = LAST_RENEW_SECS.load(core::sync::atomic::Ordering::Relaxed) as u64;
+    // smoltcp falls back to a 120s lease (T1 60s) when the server sends none.
+    (t1_s > 60).then(|| Instant::now() + Duration::from_secs(t1_s * 9 / 10))
 }
 
 fn ms_since(from: Instant) -> u32 {

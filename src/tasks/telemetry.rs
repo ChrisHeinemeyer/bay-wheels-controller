@@ -41,6 +41,8 @@ pub struct CycleReport {
     pub prev_radio_on_ms: u32,
     pub heap: HeapSteps,
     pub timings: super::fetch::FetchTimings,
+    /// Whether this cycle reused the previous DHCP lease (no DHCP exchange).
+    pub lease_reused: bool,
 }
 
 /// Free heap (bytes) at each step of the WiFi cycle, to localize a leak.
@@ -163,7 +165,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
          \"heap_prev_after_teardown\":{},\"heap_cycle_start\":{},\"heap_after_start\":{},\
          \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{},\
          \"sleep_cfg\":{},\"min_nap_us\":{},\"handshake_ms\":{},\"ttfb_ms\":{},\
-         \"body_ms\":{},\"parse_ms\":{},\"body_bytes\":{},\"src\":\"{}\"",
+         \"body_ms\":{},\"parse_ms\":{},\"body_bytes\":{},\"src\":\"{}\",\"lease\":\"{}\",\"lease_s\":{}",
         cycle.connect_ms,
         cycle.dhcp_ms,
         cycle.fetch_ms,
@@ -187,7 +189,13 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         cycle.timings.body_ms,
         cycle.timings.parse_ms,
         cycle.timings.body_bytes,
-        if cycle.timings.from_mirror { "mirror" } else { "lyft" },
+        if cycle.timings.from_mirror {
+            "mirror"
+        } else {
+            "lyft"
+        },
+        if cycle.lease_reused { "reused" } else { "dhcp" },
+        smoltcp::socket::dhcpv4::LAST_LEASE_SECS.load(core::sync::atomic::Ordering::Relaxed),
     );
 
     let mut summary = heapless::String::<256>::new();

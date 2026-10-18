@@ -70,8 +70,11 @@ pub async fn fetch<const N: usize, const TX: usize, const RX: usize>(
 
     let request_start = Instant::now();
     let mut head = heapless::String::<96>::new();
-    write!(head, " HTTP/1.1\r\nHost: {GBFS_MIRROR}\r\nConnection: close\r\n\r\n")
-        .map_err(|_| "header")?;
+    write!(
+        head,
+        " HTTP/1.1\r\nHost: {GBFS_MIRROR}\r\nConnection: close\r\n\r\n"
+    )
+    .map_err(|_| "header")?;
     conn.write_all(b"GET ").await.map_err(|_| "write")?;
     conn.write_all(path.as_bytes()).await.map_err(|_| "write")?;
     conn.write_all(head.as_bytes()).await.map_err(|_| "write")?;

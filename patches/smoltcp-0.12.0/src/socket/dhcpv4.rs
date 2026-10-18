@@ -19,6 +19,15 @@ use super::PollAt;
 
 const DEFAULT_LEASE_DURATION: Duration = Duration::from_secs(120);
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
+/// PATCHED (bay-wheels-controller): length of the last lease accepted from an
+/// ACK, in seconds (after `max_lease_duration`). 0 until the first lease.
+pub static LAST_LEASE_SECS: AtomicU32 = AtomicU32::new(0);
+/// PATCHED (bay-wheels-controller): renewal time T1 of that lease, in seconds:
+/// the server's option 58, or half the lease (RFC 2131).
+pub static LAST_RENEW_SECS: AtomicU32 = AtomicU32::new(0);
+
 const DEFAULT_PARAMETER_REQUEST_LIST: &[u8] = &[
     dhcpv4_field::OPT_SUBNET_MASK,
     dhcpv4_field::OPT_ROUTER,
@@ -534,6 +543,13 @@ impl<'a> Socket<'a> {
         let renew_at = now + renew_duration;
         let rebind_at = now + rebind_duration;
         let expires_at = now + lease_duration;
+
+        // PATCHED (bay-wheels-controller): publish the lease timing. embassy-net
+        // keeps only address/gateway/DNS from a lease, but the firmware reuses
+        // the lease across radio power-downs (skipping DHCP) and needs to know
+        // when RFC 2131 says to renew it.
+        LAST_LEASE_SECS.store(lease_duration.secs() as u32, Ordering::Relaxed);
+        LAST_RENEW_SECS.store(renew_duration.secs() as u32, Ordering::Relaxed);
 
         Some((config, renew_at, rebind_at, expires_at))
     }
