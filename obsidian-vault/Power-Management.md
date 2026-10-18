@@ -199,8 +199,8 @@ phase):
 What's left: the sleep floor (~4.1mA, board + chip, ~90% of the total) and the Xfinity XB8
 gateway ignoring the board's replies for 1-3s after each reconnect (~2mA in
 its bad phases; needs a different access point, not firmware). Full record:
-[[Power-Optimization-Log]]. The section below predates this work; its sleep
-config experiment is done.
+[[Power-Optimization-Log]]. Next steps: [[Sleep-Floor-Plan]]. The section below
+predates this work; its sleep config experiment is done.
 
 ## Next: reduce sleep current (biggest lever)
 

@@ -210,5 +210,4 @@ keeps the radio on for up to ~500s while retrying, so a refusal like that
 costs ~200mA for its duration.
 
 **Next options:** a separate access point for the board (removes the XB8's
-~2mA dead gap); the sleep floor (deep sleep between fetches, more power
-domains off).
+~2mA dead gap); the sleep floor, see [[Sleep-Floor-Plan]].
