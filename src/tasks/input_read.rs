@@ -19,6 +19,9 @@ pub async fn input_read_task(
 ) {
     crate::dprintln!("Input read task started! Board ID: {:?}", board_id);
     let mut last_touch: Option<Instant> = None;
+    // The LED task acts only on changes, and each signal costs it two wakes
+    // (the signal and its 50ms pause), so don't signal an unchanged reading.
+    let mut last_signaled: Option<StationIdx> = None;
 
     loop {
         // Liveness for `watchdog::check_and_feed`; this task is the only writer.
@@ -32,7 +35,10 @@ pub async fn input_read_task(
                 if station != StationIdx::None {
                     last_touch = Some(Instant::now());
                 }
-                STATION_SIGNAL.signal(station);
+                if last_signaled != Some(station) {
+                    STATION_SIGNAL.signal(station);
+                    last_signaled = Some(station);
+                }
                 let mut status = STATUS.lock().await;
                 status.station_input = station;
                 status.station_input_row = row;
