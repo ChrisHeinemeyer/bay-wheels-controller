@@ -18,6 +18,7 @@ VARIANTS=(
   "baseline:"
   "deep-al5887-standby:DEEP_SLEEP_TEST=1"
   "deep-al5887-shutdown:DEEP_SLEEP_TEST=2"
+  "deep-hiz:DEEP_SLEEP_TEST=3"
   "led-idle-0:LED_IDLE=0"
   "led-idle-2:LED_IDLE=2"
   "vddsdio-pd:SLEEP_VDDSDIO_PD=1"

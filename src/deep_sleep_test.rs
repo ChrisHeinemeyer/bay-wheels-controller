@@ -10,6 +10,7 @@
 //!   (AL5887 LED_EN and RST_N high). The AL5887 is never initialised, so it sits
 //!   in standby (CHIP_EN register bit 0, its power-on value).
 //! - 2: as 1, but LED_EN low too: AL5887 in hardware shutdown.
+//! - 3: every board pin high-impedance (no output, input buffer or pull).
 //!
 //! Escape hatch: a GPIO2 (provisioning button) press wakes the chip, which
 //! boots into this same window again. A power cycle clears the pad holds.
@@ -19,7 +20,7 @@ use esp_hal::gpio::{
     Flex, Input, InputConfig, InputPin, Level, Output, OutputConfig, OutputPin, Pin, Pull,
     RtcPinWithResistors,
 };
-use esp_hal::peripherals::{LPWR, Peripherals};
+use esp_hal::peripherals::{GPIO2, LPWR, Peripherals};
 use esp_hal::rtc_cntl::Rtc;
 use esp_hal::rtc_cntl::sleep::{Ext0WakeupSource, WakeupLevel};
 
@@ -46,7 +47,27 @@ pub fn run(p: Peripherals) -> ! {
     );
     Delay::new().delay_millis(AWAKE_WINDOW_MS);
 
-    let mut rtc = Rtc::new(p.LPWR);
+    let rtc = Rtc::new(p.LPWR);
+
+    if DEEP_SLEEP_TEST >= 3 {
+        // No pin driven or pulled: if the board current drops, a driven pin was
+        // pushing current into something.
+        let _pins = (
+            isolated(p.GPIO10),
+            isolated(p.GPIO12),
+            isolated(p.GPIO11),
+            isolated(p.GPIO13),
+            isolated(p.GPIO8),
+            isolated(p.GPIO9),
+            isolated(p.GPIO33),
+            isolated(p.GPIO35),
+            isolated(p.GPIO36),
+            isolated(p.GPIO37),
+            isolated(p.GPIO38),
+            isolated(p.GPIO5),
+        );
+        sleep(rtc, p.GPIO2);
+    }
 
     // Same pins and idle levels as `main.rs` sets up. The drivers must stay
     // alive (not dropped) until the chip is asleep.
@@ -77,11 +98,13 @@ pub fn run(p: Peripherals) -> ! {
         // as when the ADC owns it.
         isolated(p.GPIO5),
     );
+    sleep(rtc, p.GPIO2)
+}
 
+fn sleep(mut rtc: Rtc<'static>, wake_button: GPIO2<'static>) -> ! {
     set_pad_holds(true);
     crate::dprintln!("DEEP_SLEEP_TEST: entering deep sleep");
 
-    let wake_button = p.GPIO2;
     // See `power::init`: the RTC-domain pull-up has to be set separately.
     wake_button.rtcio_pullup(true);
     let wake = Ext0WakeupSource::new(wake_button, WakeupLevel::Low);

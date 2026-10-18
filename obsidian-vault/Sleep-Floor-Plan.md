@@ -143,6 +143,18 @@ New split (cable out, estimated): floor ~2.64mA = **board ~1.35-1.5mA**
 some of the cable's 0.17mA) + **ESP32-S3 light sleep ~1.1-1.3mA** (datasheet
 ~0.24mA). Step 2 (board) is now at least as big a lever as the chip.
 
+**Board-side follow-up (same day).** Known parts explain only ~0.1mA of the
+board's ~1.5mA: LDO quiescent tens of µA (per the user), battery divider 122kΩ
+total (37µA at 4.5V), AL5887 ~15µA, ESP32 deep sleep ~10-20µA. No power LED.
+- Hand test (deep sleep, 2s averages): touching the five 74HC165s' pins
+  changed nothing (1.607-1.612mA throughout), so floating shift-register
+  inputs are unlikely to be the drain.
+- `DEEP_SLEEP_TEST=3` (`deep-hiz`, every board pin high-impedance): 1.62-1.63mA,
+  the same as with the pins driven (1.61mA). No ESP32 pin is pushing current.
+- So the remaining ~1.4mA is hardware outside the ESP32's pins. Next: power
+  the 3.3V rail directly from the PPK2 (LDO bypassed) to split LDO / battery
+  side from the 3.3V parts.
+
 Not done: `rtc-peri-pd` hang root cause (likely the timer or GPIO wake path
 with the RTC peripheral domain off in esp-hal 1.0; not worth chasing before
 step 2 / an esp-hal upgrade).
