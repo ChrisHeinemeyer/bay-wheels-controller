@@ -200,6 +200,11 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
     // What wakes the CPU while asleep (totals since boot; see `SleepTotals`).
     let _ = write!(
         out,
+        ",\"sys_bracket_ms\":{},\"timg_bracket_ms\":{}",
+        sleep.sys_bracket_ms, sleep.timg_bracket_ms
+    );
+    let _ = write!(
+        out,
         ",\"timer_wakes_total\":{},\"armed_total\":",
         sleep.timer_wakes
     );

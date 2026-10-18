@@ -127,6 +127,9 @@ pub struct SleepTotals {
     /// by spawn order (0 = `main`, then the `spawner.spawn` calls in `main.rs`).
     pub executor_wakes: u32,
     pub task_polls: [u32; 10],
+    /// How far SYSTIMER and TIMG1 moved by themselves across sleep calls (ms).
+    pub sys_bracket_ms: u64,
+    pub timg_bracket_ms: u64,
 }
 
 static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
@@ -140,6 +143,8 @@ static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
         armed: [0; 8],
         executor_wakes: 0,
         task_polls: [0; 10],
+        sys_bracket_ms: 0,
+        timg_bracket_ms: 0,
     }));
 
 /// Totals up to the end of the last sleeping stretch.
@@ -240,6 +245,9 @@ mod inner {
         overslept: u32,
         /// ext0 wakes with GPIO2 not actually low — ignored.
         spurious_ext0: u32,
+        /// How far SYSTIMER and TIMG1 moved by themselves across sleep calls.
+        sys_bracket_us: u64,
+        timg_bracket_us: u64,
         /// Newly armed scheduler timers, bucketed by length (`ARMED_BUCKETS_MS`).
         armed: [u32; ARMED_BUCKETS_MS.len() + 1],
     }
@@ -387,6 +395,8 @@ mod inner {
                 t.spurious_ext0 += s.spurious_ext0;
                 t.rc_scale_ppm = rc_scale_ppm;
                 t.timer_wakes += s.timer_wakes;
+                t.sys_bracket_ms += s.sys_bracket_us / 1000;
+                t.timg_bracket_ms += s.timg_bracket_us / 1000;
                 for (total, n) in t.armed.iter_mut().zip(s.armed) {
                     *total += n;
                 }
@@ -519,6 +529,7 @@ mod inner {
         latch_rtc_time();
         let rtc_before = state.rtc.time_since_boot();
         let sys_before = systimer_count();
+        let timg_before = timg1_t0_count();
 
         // esp-hal converts this to RC_SLOW ticks at its nominal frequency, so
         // ask for the nominal duration that comes out to `nap_us` real time.
@@ -533,6 +544,7 @@ mod inner {
         latch_rtc_time();
         let rtc_us = (state.rtc.time_since_boot() - rtc_before).as_micros();
         let sys_us = (systimer_count() - sys_before) / SYSTIMER_TICKS_PER_US;
+        let timg_us = timg1_t0_count().wrapping_sub(timg_before) / timg1_t0_ticks_per_us();
 
         let timer_only = cause & WAKEUP_CAUSE_TIMER != 0 && cause & WAKEUP_CAUSE_EXT0 == 0;
         // `nap_us` is time spent asleep, which neither counter saw at all; the
@@ -544,12 +556,21 @@ mod inner {
         };
         if slept_us > 0 {
             advance_systimer(slept_us);
-            if advance_timg1_t0(slept_us) {
+            // esp-rtos fires its TIMG1 alarm and then checks it against
+            // SYSTIMER (`now()`). The two counters didn't move the same
+            // amount across the sleep call by themselves, and adding
+            // `slept_us` to both left TIMG1 ahead: every nap ended in an alarm
+            // that came too early and had to be re-armed (round 22). Keep them
+            // in lockstep instead: TIMG1 moves as far as SYSTIMER did.
+            let timg_advance = (sys_us + slept_us).saturating_sub(timg_us);
+            if advance_timg1_t0(timg_advance) {
                 state.stats.overslept += 1;
             }
         }
 
         let s = &mut state.stats;
+        s.sys_bracket_us += sys_us;
+        s.timg_bracket_us += timg_us;
         s.naps += 1;
         s.requested_us += nap_us;
         s.slept_us += slept_us;
