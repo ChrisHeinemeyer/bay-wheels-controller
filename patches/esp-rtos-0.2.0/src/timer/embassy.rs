@@ -22,6 +22,10 @@ impl TimerQueueInner {
         // PATCHED (bay-wheels-controller): early vs processed alarms.
         #[cfg(feature = "esp-radio")]
         crate::esp_radio::radio_timer_stats::record_embassy_alarm(now >= self.next_wakeup);
+        #[cfg(feature = "esp-radio")]
+        if now < self.next_wakeup {
+            crate::esp_radio::radio_timer_stats::record_early_gap(self.next_wakeup - now);
+        }
         if now < self.next_wakeup {
             trace!(
                 "Not processing embassy timer queue. Now: {}, expected next wakeup: {}",

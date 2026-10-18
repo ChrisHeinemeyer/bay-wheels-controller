@@ -250,6 +250,9 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         // Embassy alarms: [too early, processed, timers scheduled].
         let _ = out.push_str(",\"embassy_alarms\":");
         push_json_array(out, &esp_rtos::radio_timer_stats::embassy());
+        // Early embassy alarms by gap: <0.1, <1, <2.1, <5, <50 ms, longer.
+        let _ = out.push_str(",\"early_gaps\":");
+        push_json_array(out, &esp_rtos::radio_timer_stats::early_gaps());
     }
 
     let mut summary = heapless::String::<256>::new();

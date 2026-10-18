@@ -460,6 +460,23 @@ pub mod stats {
         }
     }
 
+    /// Early embassy alarms by how far short of the target `now` was:
+    /// <0.1, <1, <2.1, <5, <50 ms, longer.
+    static EARLY_GAP: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
+    const EARLY_GAP_US: [u64; 5] = [100, 1_000, 2_100, 5_000, 50_000];
+
+    pub(crate) fn record_early_gap(us: u64) {
+        if ENABLED.load(Ordering::Relaxed) {
+            let i = EARLY_GAP_US.iter().position(|&max| us < max).unwrap_or(5);
+            EARLY_GAP[i].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// See `EARLY_GAP`.
+    pub fn early_gaps() -> [u32; 6] {
+        core::array::from_fn(|i| EARLY_GAP[i].load(Ordering::Relaxed))
+    }
+
     /// See `EMBASSY`.
     pub fn embassy() -> [u32; 3] {
         core::array::from_fn(|i| EMBASSY[i].load(Ordering::Relaxed))
