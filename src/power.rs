@@ -672,8 +672,14 @@ mod inner {
 
     /// TIMG1 timer 0 ticks per microsecond (APB / divider), at least 1.
     fn timg1_t0_ticks_per_us() -> u64 {
+        // Same decoding as esp-hal's `Timer::divider` (TRM: a DIVIDER of 1 or
+        // 2 divides by 2, 0 by 65536). esp-rtos's TIMG1 runs with DIVIDER = 1,
+        // and reading that as /1 doubled every tick count here: naps came out
+        // half as long as the time to the alarm, then pushed TIMG1 twice as
+        // far, so each timer took ~4 naps and as many early alarms.
         let divider = match TIMG1::regs().t(0).config().read().divider().bits() {
             0 => 65536,
+            1 | 2 => 2,
             d => d as u64,
         };
         (Clocks::get().apb_clock.as_hz() as u64 / 1_000_000 / divider).max(1)
