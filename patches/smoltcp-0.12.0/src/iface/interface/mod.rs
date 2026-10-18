@@ -141,6 +141,9 @@ pub struct InterfaceInner {
     #[cfg(feature = "proto-sixlowpan-fragmentation")]
     tag: u16,
     ip_addrs: Vec<IpCidr, IFACE_MAX_ADDR_COUNT>,
+    /// PATCHED (bay-wheels-controller): the last non-empty `ip_addrs`, so a
+    /// reconfig that goes through "no address" doesn't count as a change.
+    last_ip_addrs: Vec<IpCidr, IFACE_MAX_ADDR_COUNT>,
     any_ip: bool,
     routes: Routes,
     #[cfg(feature = "multicast")]
@@ -252,6 +255,7 @@ impl Interface {
                 caps,
                 hardware_addr: config.hardware_addr,
                 ip_addrs: Vec::new(),
+                last_ip_addrs: Vec::new(),
                 any_ip: false,
                 routes: Routes::new(),
                 #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
@@ -367,12 +371,14 @@ impl Interface {
     pub fn update_ip_addrs<F: FnOnce(&mut Vec<IpCidr, IFACE_MAX_ADDR_COUNT>)>(&mut self, f: F) {
         // PATCHED (bay-wheels-controller): flush the neighbor cache only when
         // the addresses actually change. embassy-net re-applies the same
-        // static config on every reconnect, and the flush made each fetch
-        // cycle start by ARPing for the mirror host again.
-        let before = self.inner.ip_addrs.clone();
+        // static config on every reconnect (and the firmware clears it while
+        // the radio is off), and the flush made each fetch cycle start by
+        // ARPing for the mirror host again. Compare against the last
+        // non-empty address list, and never flush on the way to "none".
         f(&mut self.inner.ip_addrs);
-        if self.inner.ip_addrs != before {
+        if !self.inner.ip_addrs.is_empty() && self.inner.ip_addrs != self.inner.last_ip_addrs {
             InterfaceInner::flush_neighbor_cache(&mut self.inner);
+            self.inner.last_ip_addrs = self.inner.ip_addrs.clone();
         }
         InterfaceInner::check_ip_addrs(&self.inner.ip_addrs);
 
