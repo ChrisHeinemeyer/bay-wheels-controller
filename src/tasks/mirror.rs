@@ -12,7 +12,7 @@ use core::fmt::Write as _;
 use core::net::SocketAddr;
 
 use embassy_net::tcp::client::TcpClient;
-use embassy_time::{Duration, Instant};
+use embassy_time::{Duration, Instant, with_timeout};
 use embedded_io_async::{Read as _, Write as _};
 use embedded_nal_async::TcpConnect as _;
 
@@ -24,6 +24,9 @@ const GBFS_MIRROR: &str = env!("GBFS_MIRROR");
 /// Upper bound on connect + request + response. A healthy mirror answers in
 /// well under a second; past this the cycle falls back to Lyft.
 pub const MIRROR_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long one TCP connect attempt to the mirror may take before a new one.
+/// The mirror is on the LAN, so a healthy connect takes ~20 ms.
+const CONNECT_RETRY: Duration = Duration::from_millis(250);
 /// The only keys `StreamingStationParser` reads.
 const FIELDS: &str = "station_id,num_bikes_available,num_ebikes_available";
 
@@ -65,7 +68,17 @@ pub async fn fetch<const N: usize, const TX: usize, const RX: usize>(
 ) -> Result<(), &'static str> {
     let addr: SocketAddr = GBFS_MIRROR.parse().map_err(|_| "bad GBFS_MIRROR")?;
     let connect_start = Instant::now();
-    let mut conn = tcp.connect(addr).await.map_err(|_| "connect")?;
+    // Right after association nothing gets through for a second or two, and
+    // TCP's own SYN retransmit waits 1 s, then 2 s. A fresh connect attempt
+    // every CONNECT_RETRY gets in as soon as the link passes frames, and
+    // `handshake_ms` then measures that dead time.
+    let mut conn = loop {
+        match with_timeout(CONNECT_RETRY, tcp.connect(addr)).await {
+            Ok(Ok(conn)) => break conn,
+            Ok(Err(_)) => return Err("connect"),
+            Err(_) => continue, // the outer MIRROR_TIMEOUT bounds this
+        }
+    };
     timings.handshake_ms = ms_since(connect_start);
 
     let request_start = Instant::now();

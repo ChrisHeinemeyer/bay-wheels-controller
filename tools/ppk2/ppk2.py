@@ -46,8 +46,14 @@ def open_ppk(port, mv):
     # then garble the metadata read. Stop it and drain before asking.
     for attempt in range(5):
         PPK2_API.stop_measuring(ppk)
-        time.sleep(0.2)
-        ppk.ser.reset_input_buffer()
+        # Drain until the port has been quiet for 300 ms: samples already in
+        # flight keep arriving for a while after the stop command.
+        quiet_since = time.monotonic()
+        while time.monotonic() - quiet_since < 0.3:
+            if ppk.ser.in_waiting:
+                ppk.ser.reset_input_buffer()
+                quiet_since = time.monotonic()
+            time.sleep(0.02)
         try:
             ppk.get_modifiers()
             break
