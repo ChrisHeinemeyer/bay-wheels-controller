@@ -128,7 +128,10 @@ fn disable_pmf() {
         cfg.sta.pmf_cfg.required = false;
         let set = esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut cfg);
         crate::dprintln!("PMF disabled (get {}, set {})", got, set);
-        PMF_SET_RESULT.store(if got != 0 { got } else { set }, core::sync::atomic::Ordering::Relaxed);
+        PMF_SET_RESULT.store(
+            if got != 0 { got } else { set },
+            core::sync::atomic::Ordering::Relaxed,
+        );
     }
 }
 
