@@ -34,9 +34,6 @@ const TCP_TX_SIZE: usize = 4096;
 /// its own, so a server that stalls mid-body would otherwise hold the radio on
 /// until the watchdog's fetch-stall reset.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(90);
-/// Reuse the last DHCP lease across cycles until its renewal time T1 (see the
-/// lease handling in `fetch_task`). `DHCP_REUSE=0` at build time turns that off.
-const DHCP_REUSE: bool = crate::power::parse_u32(option_env!("DHCP_REUSE"), 1) != 0;
 /// Gap after any failed cycle (start/connect/DHCP/fetch) before retrying.
 const RETRY_GAP: Duration = Duration::from_secs(60);
 /// Gap after a successful fetch before the next cycle — the radio is stopped for
@@ -44,9 +41,6 @@ const RETRY_GAP: Duration = Duration::from_secs(60);
 /// `FETCH_GAP_S` at build time overrides it (shorter cycles while testing).
 const SUCCESS_GAP: Duration =
     Duration::from_secs(crate::power::parse_u32(option_env!("FETCH_GAP_S"), 120) as u64);
-
-/// GARP=0 (build-time) skips the gratuitous ARP after each connect.
-const GARP: bool = crate::power::parse_u32(option_env!("GARP"), 1) != 0;
 
 /// Where the fetch's radio-on time goes. `body_ms - parse_ms` is time spent
 /// waiting on the network and in TLS decryption; `parse_ms` is CPU-only.
@@ -114,7 +108,7 @@ pub async fn fetch_task(
     // Adaptive TX power, now re-based on successful connect+fetch cycles instead
     // of 5-second maintenance ticks (there's no multi-minute "stable connection"
     // clock left once the radio is torn down every cycle). See wifi_connect.rs.
-    let mut tx_power = TX_POWER_FIXED.unwrap_or(wifi_connect::TX_POWER_MAX);
+    let mut tx_power = wifi_connect::TX_POWER_MAX;
     let mut success_streak: u32 = 0;
     // The last DHCP lease and when to stop reusing it. Cleared on any failure
     // so the next cycle asks DHCP again.
@@ -198,12 +192,6 @@ pub async fn fetch_task(
         };
         crate::dprintln!("✓ Connected (RSSI: {})", connected_rssi);
         let connected_at = Instant::now();
-        // Announce ourselves before anything has to reach us: with the ARP
-        // cache and lease reused, nothing else from this station tells the
-        // LAN it is back, and unicast to it was lost for 1-3 s.
-        if GARP {
-            smoltcp::iface::ANNOUNCE_ARP.store(true, Ordering::Relaxed);
-        }
         #[cfg(feature = "log-server")]
         {
             heap_steps.after_connect = heap();
@@ -223,7 +211,7 @@ pub async fn fetch_task(
         }
         if let Some(config) = stack.config_v4() {
             crate::dprintln!("Network is up! IP: {}", config.address);
-            if DHCP_REUSE && !lease_reused {
+            if !lease_reused {
                 lease = lease_reuse_until().map(|until| (config, until));
             }
         }
@@ -342,22 +330,14 @@ async fn teardown(controller: &mut WifiController<'static>) {
 
 /// Lock TX power at max after any failure — same "this board needs the headroom
 /// after trouble" behavior as the old design's `tx_locked` flag.
-/// Measurement aid: `TX_POWER_FIXED` (quarter-dBm) at build time pins TX power
-/// and turns the adaptive stepping off, so builds compared on the PPK2 transmit
-/// the same. Unset or 0 = adaptive.
-const TX_POWER_FIXED: Option<i8> = match crate::power::parse_u32(option_env!("TX_POWER_FIXED"), 0) {
-    0 => None,
-    q => Some(q as i8),
-};
-
 fn reset_tx_power(tx_power: &mut i8, success_streak: &mut u32) {
-    *tx_power = TX_POWER_FIXED.unwrap_or(wifi_connect::TX_POWER_MAX);
+    *tx_power = wifi_connect::TX_POWER_MAX;
     *success_streak = 0;
 }
 
 /// After enough consecutive successful cycles, probe one step lower.
 fn step_tx_power_on_success(tx_power: &mut i8, success_streak: &mut u32) {
-    if TX_POWER_FIXED.is_some() || *tx_power <= wifi_connect::TX_POWER_MIN {
+    if *tx_power <= wifi_connect::TX_POWER_MIN {
         return;
     }
     *success_streak = success_streak.saturating_add(1);

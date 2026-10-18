@@ -80,7 +80,6 @@ impl CpuSchedulerState {
                 pinned_to: None,
 
                 wakeup_at: 0,
-                entry: 0,
                 run_queued: false,
                 timer_queued: false,
 

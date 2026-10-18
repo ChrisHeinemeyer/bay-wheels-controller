@@ -229,22 +229,17 @@ def measure(o, seconds, sleep_max, radio_min, power_on, csv_path, json_path, lab
               help="Seconds from the start of the CSV to board uptime 0")
 @click.option("--trim", default=15.0, show_default=True,
               help="Seconds dropped at each window edge")
-@click.option("--levels", default=4, show_default=True,
-              help="Windows repeat with this period (SLEEP_SWEEP_S levels)")
 @click.option("--sleep-max", default=25.0, show_default=True)
 @click.option("--radio-min", default=80.0, show_default=True)
-def windows(csv_path, window, offset, trim, levels, sleep_max, radio_min):
-    """Summarize a `measure --csv` recording per fixed-length window.
-
-    For a SLEEP_SWEEP_S build, use the same window: window n is level n % levels.
-    """
+def windows(csv_path, window, offset, trim, sleep_max, radio_min):
+    """Summarize a `measure --csv` recording per fixed-length window."""
     with open(csv_path) as f:
         r = csv.reader(f)
         next(r)
         bins = [float(row[1]) for row in r]
     w_ms, o_ms, t_ms = int(window * 1000), int(offset * 1000), int(trim * 1000)
     n = 0
-    click.echo("win level   secs   avg mA  asleep% (mA)    awake% (mA)    radio% (mA)")
+    click.echo("win   secs   avg mA  asleep% (mA)    awake% (mA)    radio% (mA)")
     while o_ms + n * w_ms + t_ms < len(bins):
         lo = o_ms + n * w_ms + t_ms
         hi = min(o_ms + (n + 1) * w_ms - t_ms, len(bins))
@@ -256,7 +251,7 @@ def windows(csv_path, window, offset, trim, levels, sleep_max, radio_min):
             c = s["split"][name]
             avg = f"{c['avg_ma']:5.1f}" if c["avg_ma"] is not None else "  —  "
             cols.append(f"{c['share'] * 100:5.1f}% ({avg})")
-        click.echo(f"{n:3} {n % levels:5} {s['seconds']:6.0f} {s['avg_ma']:8.2f}  " + "  ".join(cols))
+        click.echo(f"{n:3} {s['seconds']:6.0f} {s['avg_ma']:8.2f}  " + "  ".join(cols))
         n += 1
 
 

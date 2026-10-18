@@ -19,13 +19,6 @@ impl TimerQueueInner {
     }
 
     pub(crate) fn handle_alarm(&mut self, now: u64) {
-        // PATCHED (bay-wheels-controller): early vs processed alarms.
-        #[cfg(feature = "esp-radio")]
-        crate::esp_radio::radio_timer_stats::record_embassy_alarm(now >= self.next_wakeup);
-        #[cfg(feature = "esp-radio")]
-        if now < self.next_wakeup {
-            crate::esp_radio::radio_timer_stats::record_early_gap(self.next_wakeup - now);
-        }
         if now < self.next_wakeup {
             trace!(
                 "Not processing embassy timer queue. Now: {}, expected next wakeup: {}",
@@ -40,8 +33,6 @@ impl TimerQueueInner {
 
     fn schedule_wake(&mut self, at: u64, waker: &Waker) -> bool {
         if self.queue.schedule_wake(at, waker) {
-            #[cfg(feature = "esp-radio")]
-            crate::esp_radio::radio_timer_stats::record_embassy_schedule();
             self.next_wakeup = self.next_wakeup.min(at);
             true
         } else {

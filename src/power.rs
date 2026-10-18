@@ -30,60 +30,12 @@
 
 use core::sync::atomic::AtomicBool;
 
-/// Which parts of the chip light sleep powers down, from the `SLEEP_CFG` build
-/// env var (default 2: asleep current 11.9 → 4.4 mA on the PPK2; level 3 only
-/// saved another ~0.1 mA). Each level adds to the one before:
-/// - 0: esp-hal's default `RtcSleepConfig`.
-/// - 1: internal 8 MHz oscillator off.
-/// - 2: ESP-IDF's light-sleep regulator settings with XTAL and 8M off (digital
-///   rail dropped in sleep, bias and current-monitor powered down).
-/// - 3: WiFi/modem power domain off. The radio is stopped during every nap.
-pub const SLEEP_CFG: u32 = parse_u32(option_env!("SLEEP_CFG"), 2);
-
-/// Highest `SLEEP_CFG` level.
-pub const SLEEP_CFG_MAX: u32 = 3;
-
-/// Measurement aid: with `SLEEP_SWEEP_S` set at build time, the level steps
-/// through 0..=`SLEEP_CFG_MAX` every that many seconds of uptime (repeating),
-/// so one PPK2 recording covers every level. 0 = off, use `SLEEP_CFG`.
-const SLEEP_SWEEP_S: u32 = parse_u32(option_env!("SLEEP_SWEEP_S"), 0);
-
-/// The light-sleep level in effect now.
-pub fn sleep_level() -> u32 {
-    if SLEEP_SWEEP_S == 0 {
-        return SLEEP_CFG;
-    }
-    sweep_step(SLEEP_SWEEP_S, SLEEP_CFG_MAX + 1)
-}
-
 /// Shortest idle gap the hook will light-sleep through (shorter ones `waiti`).
-/// `MIN_NAP_US` at build time overrides the default; it must stay above the
-/// idle hook's 2 ms wake margin.
-const MIN_NAP_US: u32 = parse_u32(option_env!("MIN_NAP_US"), 5_000);
+/// Sweeping 5 down to 2.5 ms made no measurable difference (2026-10-17).
+const MIN_NAP_US: u32 = 5_000;
 
-/// Measurement aid like `SLEEP_SWEEP_S`: with `NAP_SWEEP_S` set, the minimum
-/// nap steps through `NAP_SWEEP_US` every that many seconds of uptime.
-const NAP_SWEEP_S: u32 = parse_u32(option_env!("NAP_SWEEP_S"), 0);
-const NAP_SWEEP_US: [u32; 4] = [5_000, 4_000, 3_000, 2_500];
-
-/// The minimum nap in effect now, in µs.
-pub fn min_nap_us() -> u32 {
-    if NAP_SWEEP_S == 0 {
-        return MIN_NAP_US;
-    }
-    NAP_SWEEP_US[sweep_step(NAP_SWEEP_S, NAP_SWEEP_US.len() as u32) as usize]
-}
-
-/// `(uptime / period_s) % steps`.
-fn sweep_step(period_s: u32, steps: u32) -> u32 {
-    // esp-hal's clock, not embassy's: this runs in the idle hook.
-    let uptime_s = esp_hal::time::Instant::now()
-        .duration_since_epoch()
-        .as_secs();
-    ((uptime_s / period_s as u64) % steps as u64) as u32
-}
-
-/// `option_env!` value as a number, or `default` if unset. Fails the build on
+/// `option_env!` value as a number, or `default` if unset (build-time knobs
+/// such as `FETCH_GAP_S`). Fails the build on
 /// anything but ASCII digits.
 pub const fn parse_u32(s: Option<&str>, default: u32) -> u32 {
     let Some(s) = s else { return default };
@@ -117,22 +69,10 @@ pub struct SleepTotals {
     pub spurious_ext0: u32,
     /// Latest RC_SLOW calibration (real µs per million nominal); 0 if none.
     pub rc_scale_ppm: u32,
-    /// Naps ended by the timer (rather than GPIO2).
-    pub timer_wakes: u32,
-    /// Newly armed scheduler timers while asleep, by length: <=2, 10, 20, 50,
-    /// 100, 300, 1000 ms, longer. The dominant bucket is the period of
-    /// whatever keeps waking the CPU.
-    pub armed: [u32; 8],
     /// `sleep-trace` only: embassy executor wakes while asleep, and task polls
     /// by spawn order (0 = `main`, then the `spawner.spawn` calls in `main.rs`).
     pub executor_wakes: u32,
     pub task_polls: [u32; 10],
-    /// How far SYSTIMER and TIMG1 moved by themselves across sleep calls (ms).
-    pub sys_bracket_ms: u64,
-    pub timg_bracket_ms: u64,
-    /// Naps with the TIMG1 alarm interrupt raised before the sleep, right
-    /// after it, and after advancing the counters.
-    pub int_raw: [u32; 3],
 }
 
 static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
@@ -142,13 +82,8 @@ static SLEEP_TOTALS: critical_section::Mutex<core::cell::Cell<SleepTotals>> =
         near_deadline_waits: 0,
         spurious_ext0: 0,
         rc_scale_ppm: 0,
-        timer_wakes: 0,
-        armed: [0; 8],
         executor_wakes: 0,
         task_polls: [0; 10],
-        sys_bracket_ms: 0,
-        timg_bracket_ms: 0,
-        int_raw: [0; 3],
     }));
 
 /// Totals up to the end of the last sleeping stretch.
@@ -175,12 +110,11 @@ mod inner {
 
     /// Longest single nap, used when no task deadline is armed.
     const MAX_NAP_US: u64 = 1_000_000;
-    /// Don't sleep if the next deadline is closer than this — `waiti` instead.
-    // Minimum nap: see `super::min_nap_us()`.
-    /// End each nap this long before the deadline, to absorb wake-up latency.
-    const WAKE_MARGIN_US: u64 = 2_000;
-    /// After an overslept nap, leave TIMG1 this far short of its alarm so the
-    /// next idle pass `waiti`s and the alarm fires by itself.
+    // Minimum nap: see `super::MIN_NAP_US`.
+    /// When a nap reaches the deadline (every timer wake: naps run right up to
+    /// it, so tasks run up to the wake-up latency late), leave TIMG1 this far
+    /// short of its alarm so the next idle pass `waiti`s and the alarm fires by
+    /// itself.
     const OVERSLEEP_LEAD_US: u64 = 20;
     /// No sleep for this long after reset, so probe-rs can always attach.
     const BOOT_GRACE: Duration = Duration::from_secs(20);
@@ -205,8 +139,7 @@ mod inner {
 
     struct State {
         rtc: Rtc<'static>,
-        /// One per level, indexed by `super::sleep_level()`.
-        sleep_cfgs: [RtcSleepConfig; super::SLEEP_CFG_MAX as usize + 1],
+        sleep_cfg: RtcSleepConfig,
         wake_button: Ext0WakeupSource<GPIO2<'static>>,
         /// No sleep until `Instant::now()` passes this (boot grace / button window).
         awake_until_us: u64,
@@ -245,16 +178,11 @@ mod inner {
         /// `sleep_compensated`).
         rtc_us: u64,
         max_nap_us: u64,
-        /// Naps that ran past the TIMG1 alarm.
+        /// Naps that reached the TIMG1 alarm (every timer wake, now that naps run
+        /// right up to the deadline).
         overslept: u32,
         /// ext0 wakes with GPIO2 not actually low — ignored.
         spurious_ext0: u32,
-        /// How far SYSTIMER and TIMG1 moved by themselves across sleep calls.
-        sys_bracket_us: u64,
-        timg_bracket_us: u64,
-        /// TIMG1 alarm interrupt raised: before the sleep, right after it,
-        /// and after advancing the counters (counts of naps).
-        int_raw: [u32; 3],
         /// Newly armed scheduler timers, bucketed by length (`ARMED_BUCKETS_MS`).
         armed: [u32; ARMED_BUCKETS_MS.len() + 1],
     }
@@ -288,7 +216,7 @@ mod inner {
             unsafe {
                 *STATE.0.get() = Some(State {
                     rtc,
-                    sleep_cfgs: core::array::from_fn(|level| sleep_config(level as u32)),
+                    sleep_cfg: sleep_config(),
                     wake_button,
                     awake_until_us: BOOT_GRACE.as_micros() as u64,
                     sleeping: false,
@@ -303,27 +231,22 @@ mod inner {
         });
     }
 
-    /// The `RtcSleepConfig` for a `super::SLEEP_CFG` level. Level 2 values are ESP-IDF's
-    /// `rtc_sleep_get_default_config` light-sleep branch with XTAL and 8M
-    /// powered down (esp32s3 `rtc.h`: `RTC_CNTL_DBIAS_SLP` = 5,
-    /// `RTC_CNTL_DBG_ATTEN_LIGHTSLEEP_DEFAULT` = 5, bias/pd_cur DEFAULT = 1).
-    fn sleep_config(level: u32) -> RtcSleepConfig {
+    /// ESP-IDF's `rtc_sleep_get_default_config` light-sleep branch with XTAL
+    /// and the internal 8 MHz oscillator powered down (esp32s3 `rtc.h`:
+    /// `RTC_CNTL_DBIAS_SLP` = 5, `RTC_CNTL_DBG_ATTEN_LIGHTSLEEP_DEFAULT` = 5,
+    /// bias/pd_cur DEFAULT = 1). On the PPK2 this took the asleep current from
+    /// 11.9 mA (esp-hal's default config) to 4.4 mA; also powering down the
+    /// modem domain saved only ~0.1 mA more (2026-10-17).
+    fn sleep_config() -> RtcSleepConfig {
         let mut cfg = RtcSleepConfig::default();
-        if level >= 1 {
-            cfg.set_int_8m_pd_en(true);
-        }
-        if level >= 2 {
-            cfg.set_rtc_regulator_fpu(true);
-            cfg.set_dbg_atten_slp(5);
-            cfg.set_dig_dbias_slp(5);
-            cfg.set_bias_sleep_slp(true);
-            cfg.set_pd_cur_slp(true);
-            cfg.set_bias_sleep_monitor(true);
-            cfg.set_pd_cur_monitor(true);
-        }
-        if level >= 3 {
-            cfg.set_modem_pd_en(true);
-        }
+        cfg.set_int_8m_pd_en(true);
+        cfg.set_rtc_regulator_fpu(true);
+        cfg.set_dbg_atten_slp(5);
+        cfg.set_dig_dbias_slp(5);
+        cfg.set_bias_sleep_slp(true);
+        cfg.set_pd_cur_slp(true);
+        cfg.set_bias_sleep_monitor(true);
+        cfg.set_pd_cur_monitor(true);
         cfg
     }
 
@@ -359,8 +282,6 @@ mod inner {
                 if !state.sleeping {
                     state.sleeping = true;
                     super::SLEEPING.store(true, Ordering::Relaxed);
-                    #[cfg(feature = "sleep-trace")]
-                    esp_rtos::radio_timer_stats::ENABLED.store(true, Ordering::Relaxed);
                     // SYSTIMER is only advanced by estimate while asleep, so
                     // each awake stretch calibrates from scratch.
                     state.cal_anchor = None;
@@ -388,8 +309,6 @@ mod inner {
     fn end_sleeping(state: &mut State, reason: &str) {
         state.sleeping = false;
         super::SLEEPING.store(false, Ordering::Relaxed);
-        #[cfg(feature = "sleep-trace")]
-        esp_rtos::radio_timer_stats::ENABLED.store(false, Ordering::Relaxed);
         {
             let s = &state.stats;
             let rc_scale_ppm = state.rtc_scale_ppm as u32;
@@ -401,15 +320,6 @@ mod inner {
                 t.near_deadline_waits += s.near_deadline;
                 t.spurious_ext0 += s.spurious_ext0;
                 t.rc_scale_ppm = rc_scale_ppm;
-                t.timer_wakes += s.timer_wakes;
-                t.sys_bracket_ms += s.sys_bracket_us / 1000;
-                t.timg_bracket_ms += s.timg_bracket_us / 1000;
-                for (total, n) in t.int_raw.iter_mut().zip(s.int_raw) {
-                    *total += n;
-                }
-                for (total, n) in t.armed.iter_mut().zip(s.armed) {
-                    *total += n;
-                }
                 #[cfg(feature = "sleep-trace")]
                 {
                     let (polls, wakes) = super::trace::peek();
@@ -435,7 +345,7 @@ mod inner {
         crate::dprintln!(
             "light-sleep: leaving ({}) at uptime {}ms after {} naps ({} near-deadline waits), \
              slept {}ms (avg nap {}ms, max {}ms; rtc-measured {}ms), \
-             {} overslept, {} timer wakes, {} spurious ext0, causes {:#x}, \
+             {} reached deadline, {} timer wakes, {} spurious ext0, causes {:#x}, \
              armed timers ms <=2/10/20/50/100/300/1000/more: {:?}",
             reason,
             now_us() / 1000,
@@ -523,7 +433,9 @@ mod inner {
             MAX_NAP_US
         };
         let budget = until_alarm_us.min(MAX_NAP_US);
-        (budget >= super::min_nap_us() as u64).then(|| budget - WAKE_MARGIN_US)
+        // No early-wake margin: a task running a little late is fine, and a
+        // 2 ms margin cost a 2 ms awake wait on every wake.
+        (budget >= super::MIN_NAP_US as u64).then_some(budget)
     }
 
     /// One light-sleep nap of up to `nap_us`, then advance SYSTIMER and TIMG1 by
@@ -539,8 +451,6 @@ mod inner {
         latch_rtc_time();
         let rtc_before = state.rtc.time_since_boot();
         let sys_before = systimer_count();
-        let timg_before = timg1_t0_count();
-        let int_before = timg1_int_raw();
 
         // esp-hal converts this to RC_SLOW ticks at its nominal frequency, so
         // ask for the nominal duration that comes out to `nap_us` real time.
@@ -548,15 +458,14 @@ mod inner {
         let timer = TimerWakeupSource::new(Duration::from_micros(nominal_us));
         // The wake alarm is set relative to an RTC read inside `sleep_light`.
         latch_rtc_time();
-        let cfg = state.sleep_cfgs[super::sleep_level() as usize];
-        state.rtc.sleep(&cfg, &[&timer, &state.wake_button]);
+        state
+            .rtc
+            .sleep(&state.sleep_cfg, &[&timer, &state.wake_button]);
 
         let cause = LPWR::regs().slp_wakeup_cause().read().wakeup_cause().bits();
-        let int_after_sleep = timg1_int_raw();
         latch_rtc_time();
         let rtc_us = (state.rtc.time_since_boot() - rtc_before).as_micros();
         let sys_us = (systimer_count() - sys_before) / SYSTIMER_TICKS_PER_US;
-        let timg_us = timg1_t0_count().wrapping_sub(timg_before) / timg1_t0_ticks_per_us();
 
         let timer_only = cause & WAKEUP_CAUSE_TIMER != 0 && cause & WAKEUP_CAUSE_EXT0 == 0;
         // `nap_us` is time spent asleep, which neither counter saw at all; the
@@ -568,25 +477,12 @@ mod inner {
         };
         if slept_us > 0 {
             advance_systimer(slept_us);
-            // esp-rtos fires its TIMG1 alarm and then checks it against
-            // SYSTIMER (`now()`). The two counters didn't move the same
-            // amount across the sleep call by themselves, and adding
-            // `slept_us` to both left TIMG1 ahead: every nap ended in an alarm
-            // that came too early and had to be re-armed (round 22). Keep them
-            // in lockstep instead: TIMG1 moves as far as SYSTIMER did.
-            let timg_advance = (sys_us + slept_us).saturating_sub(timg_us);
-            if advance_timg1_t0(timg_advance) {
+            if advance_timg1_t0(slept_us) {
                 state.stats.overslept += 1;
             }
         }
 
-        let int_after_advance = timg1_int_raw();
         let s = &mut state.stats;
-        s.int_raw[0] += int_before as u32;
-        s.int_raw[1] += int_after_sleep as u32;
-        s.int_raw[2] += int_after_advance as u32;
-        s.sys_bracket_us += sys_us;
-        s.timg_bracket_us += timg_us;
         s.naps += 1;
         s.requested_us += nap_us;
         s.slept_us += slept_us;
@@ -660,11 +556,6 @@ mod inner {
         ((t.hi().read().bits() as u64) << 32) | t.lo().read().bits() as u64
     }
 
-    /// Whether TIMG1 timer 0's alarm interrupt is raised.
-    fn timg1_int_raw() -> bool {
-        TIMG1::regs().int_raw().read().t(0).bit_is_set()
-    }
-
     fn timg1_t0_alarm() -> u64 {
         let t = TIMG1::regs().t(0);
         ((t.alarmhi().read().bits() as u64) << 32) | t.alarmlo().read().bits() as u64
@@ -676,7 +567,8 @@ mod inner {
         // 2 divides by 2, 0 by 65536). esp-rtos's TIMG1 runs with DIVIDER = 1,
         // and reading that as /1 doubled every tick count here: naps came out
         // half as long as the time to the alarm, then pushed TIMG1 twice as
-        // far, so each timer took ~4 naps and as many early alarms.
+        // far, so each timer took ~4 naps and as many early alarms
+        // (2026-10-18; ~11.4 -> ~6.7 mA average).
         let divider = match TIMG1::regs().t(0).config().read().divider().bits() {
             0 => 65536,
             1 | 2 => 2,
@@ -686,7 +578,7 @@ mod inner {
     }
 
     /// Moves esp-rtos's pending wakeup alarm forward by `us`, so it fires on the
-    /// real-time schedule. If that would reach an armed alarm (the nap overslept
+    /// real-time schedule. If that would reach an armed alarm (the nap ran to
     /// its deadline), stops `OVERSLEEP_LEAD_US` short instead so the next idle
     /// pass `waiti`s and the comparator fires by itself — this doesn't depend
     /// on whether it triggers on an exact match or on passing. Returns whether

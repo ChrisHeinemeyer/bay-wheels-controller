@@ -31,9 +31,7 @@ pub fn dhcp_config() -> Config {
     // is reliably lost — every cycle's DHCP took ~9.9s, i.e. exactly one retry.
     // Retrying after 250ms costs a few tiny broadcasts and saves ~9s of radio-on
     // time per cycle (with the patched smoltcp keeping the xid across
-    // retries, so a late OFFER still counts). `DHCP_DISCOVER_MS` at build time
-    // overrides the 250ms.
-    let discover_ms = crate::power::parse_u32(option_env!("DHCP_DISCOVER_MS"), 250);
-    dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_millis(discover_ms as u64);
+    // retries, so a late OFFER still counts).
+    dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_millis(250);
     Config::dhcpv4(dhcp)
 }

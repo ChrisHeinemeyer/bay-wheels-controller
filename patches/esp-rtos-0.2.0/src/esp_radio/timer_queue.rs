@@ -116,7 +116,6 @@ impl TimerQueue {
             q.next_wakeup = u64::MAX;
             q.head.take()
         });
-        let mut fired_any = false;
 
         while let Some(current) = timers {
             debug!("Checking timer: {:x}", current.addr());
@@ -153,8 +152,6 @@ impl TimerQueue {
             });
 
             if run_callback {
-                fired_any = true;
-                stats::record_fire(current_timer.func);
                 debug!("Triggering timer: {:x}", current_timer as *const _ as usize);
                 (current_timer.callback.borrow_mut())();
             }
@@ -182,8 +179,6 @@ impl TimerQueue {
                 }
             });
         }
-
-        stats::record_pass(fired_any);
 
         self.inner.with(|q| {
             let next_wakeup = q.next_wakeup;
@@ -218,8 +213,6 @@ impl<T> TimerQueueCell<T> {
 
 pub struct Timer {
     callback: RefCell<Box<dyn FnMut() + Send>>,
-    /// PATCHED (bay-wheels-controller): the C callback's address, for `stats`.
-    func: usize,
     // Timer properties, not available in `callback` due to how the timer is constructed.
     timer_properties: TimerQueueCell<TimerProperties>,
 }
@@ -228,7 +221,6 @@ impl Timer {
     pub fn new(callback: Box<dyn FnMut() + Send>) -> Self {
         Timer {
             callback: RefCell::new(callback),
-            func: 0,
             timer_properties: TimerQueueCell::new(TimerProperties {
                 is_active: false,
                 next_due: 0,
@@ -291,9 +283,7 @@ impl TimerImplementation for Timer {
 
         let mut callback = CCallback { func, data };
 
-        let func_addr = func as usize;
-        let mut timer = Box::new(Timer::new(Box::new(move || unsafe { callback.call() })));
-        timer.func = func_addr;
+        let timer = Box::new(Timer::new(Box::new(move || unsafe { callback.call() })));
         let ptr = NonNull::from(Box::leak(timer)).cast();
         debug!("Created timer: {:x}", ptr.addr());
         ptr
@@ -359,160 +349,5 @@ register_timer_implementation!(Timer);
 pub(crate) extern "C" fn timer_task(_: *mut c_void) {
     loop {
         TIMER_QUEUE.process();
-    }
-}
-
-/// PATCHED (bay-wheels-controller): counts timer callbacks by C function
-/// address while `ENABLED`, to find which radio timers keep waking the CPU
-/// once the radio is stopped. Map the addresses to symbols with the ELF.
-pub mod stats {
-    use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-
-    /// Distinct callback functions tracked.
-    pub const SLOTS: usize = 16;
-
-    /// Count only while set (the firmware sets it while light-sleeping).
-    pub static ENABLED: AtomicBool = AtomicBool::new(false);
-    static FUNCS: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
-    static FIRES: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
-    /// Fires whose function didn't fit in the table.
-    static OTHER: AtomicU32 = AtomicU32::new(0);
-    /// `process()` passes, and those that ran no callback (e.g. woken for a
-    /// timer that was disarmed before it was due).
-    static PASSES: AtomicU32 = AtomicU32::new(0);
-    static EMPTY_PASSES: AtomicU32 = AtomicU32::new(0);
-
-    pub(super) fn record_fire(func: usize) {
-        if !ENABLED.load(Ordering::Relaxed) {
-            return;
-        }
-        for i in 0..SLOTS {
-            let cur = FUNCS[i].load(Ordering::Relaxed);
-            if cur == func
-                || (cur == 0
-                    && FUNCS[i]
-                        .compare_exchange(0, func, Ordering::Relaxed, Ordering::Relaxed)
-                        .map_or_else(|v| v == func, |_| true))
-            {
-                FIRES[i].fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-        }
-        OTHER.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(super) fn record_pass(fired_any: bool) {
-        if !ENABLED.load(Ordering::Relaxed) {
-            return;
-        }
-        PASSES.fetch_add(1, Ordering::Relaxed);
-        if !fired_any {
-            EMPTY_PASSES.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    static SLEEP_ENTRIES: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(usize::MAX) }; SLOTS];
-    static SLEEPS: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
-
-    /// Counts a timed sleep by the thread whose entry function is `entry`
-    /// (0 = main task, which runs the embassy executor).
-    pub(crate) fn record_sleep(entry: usize) {
-        if !ENABLED.load(Ordering::Relaxed) {
-            return;
-        }
-        for i in 0..SLOTS {
-            let cur = SLEEP_ENTRIES[i].load(Ordering::Relaxed);
-            if cur == entry
-                || (cur == usize::MAX
-                    && SLEEP_ENTRIES[i]
-                        .compare_exchange(usize::MAX, entry, Ordering::Relaxed, Ordering::Relaxed)
-                        .map_or_else(|v| v == entry, |_| true))
-            {
-                SLEEPS[i].fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-        }
-    }
-
-    static ARMS: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
-
-    /// Counts an RTOS alarm armed for: 0 a sleeping thread, 1 the time
-    /// slice, 2 the embassy timer queue, 3 nothing / unknown.
-    pub(crate) fn record_arm(source: usize) {
-        if ENABLED.load(Ordering::Relaxed) {
-            ARMS[source].fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    /// Embassy queue: [alarms that came too early, alarms processed,
-    /// schedule_wake calls that added or moved a timer].
-    static EMBASSY: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
-
-    pub(crate) fn record_embassy_alarm(processed: bool) {
-        if ENABLED.load(Ordering::Relaxed) {
-            EMBASSY[processed as usize].fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    pub(crate) fn record_embassy_schedule() {
-        if ENABLED.load(Ordering::Relaxed) {
-            EMBASSY[2].fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    /// Early embassy alarms by how far short of the target `now` was:
-    /// <0.1, <1, <2.1, <5, <50 ms, longer.
-    static EARLY_GAP: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
-    const EARLY_GAP_US: [u64; 5] = [100, 1_000, 2_100, 5_000, 50_000];
-
-    pub(crate) fn record_early_gap(us: u64) {
-        if ENABLED.load(Ordering::Relaxed) {
-            let i = EARLY_GAP_US.iter().position(|&max| us < max).unwrap_or(5);
-            EARLY_GAP[i].fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    /// See `EARLY_GAP`.
-    pub fn early_gaps() -> [u32; 6] {
-        core::array::from_fn(|i| EARLY_GAP[i].load(Ordering::Relaxed))
-    }
-
-    /// See `EMBASSY`.
-    pub fn embassy() -> [u32; 3] {
-        core::array::from_fn(|i| EMBASSY[i].load(Ordering::Relaxed))
-    }
-
-    /// Alarms armed by source (see `record_arm`).
-    pub fn arms() -> [u32; 4] {
-        core::array::from_fn(|i| ARMS[i].load(Ordering::Relaxed))
-    }
-
-    /// `(thread entry address, timed sleeps)` per used slot.
-    pub fn sleeps() -> [(usize, u32); SLOTS] {
-        let mut out = [(usize::MAX, 0); SLOTS];
-        for (i, slot) in out.iter_mut().enumerate() {
-            *slot = (
-                SLEEP_ENTRIES[i].load(Ordering::Relaxed),
-                SLEEPS[i].load(Ordering::Relaxed),
-            );
-        }
-        out
-    }
-
-    /// `(function address, fires)` per slot (unused slots are `(0, 0)`), plus
-    /// (fires of other functions, passes, empty passes). Totals since boot.
-    pub fn snapshot() -> ([(usize, u32); SLOTS], (u32, u32, u32)) {
-        let mut out = [(0, 0); SLOTS];
-        for (i, slot) in out.iter_mut().enumerate() {
-            *slot = (FUNCS[i].load(Ordering::Relaxed), FIRES[i].load(Ordering::Relaxed));
-        }
-        (
-            out,
-            (
-                OTHER.load(Ordering::Relaxed),
-                PASSES.load(Ordering::Relaxed),
-                EMPTY_PASSES.load(Ordering::Relaxed),
-            ),
-        )
     }
 }

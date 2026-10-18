@@ -22,8 +22,6 @@ use crate::{
 
 mod queue;
 mod timer_queue;
-// PATCHED (bay-wheels-controller)
-pub use timer_queue::stats as radio_timer_stats;
 
 impl esp_radio_rtos_driver::Scheduler for Scheduler {
     fn initialized(&self) -> bool {

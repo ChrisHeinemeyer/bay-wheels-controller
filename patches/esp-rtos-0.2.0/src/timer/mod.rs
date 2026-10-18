@@ -167,29 +167,6 @@ impl TimeDriver {
 
         self.current_alarm = next_wakeup;
 
-        // PATCHED (bay-wheels-controller): which queue this alarm is for.
-        #[cfg(feature = "esp-radio")]
-        {
-            let q = &self.timer_queue;
-            let slice = q.time_slice_target.iter().copied().min().unwrap_or(u64::MAX);
-            #[cfg(feature = "embassy")]
-            let embassy = TIMER_QUEUE.next_wakeup();
-            #[cfg(not(feature = "embassy"))]
-            let embassy = u64::MAX;
-            let source = if next_wakeup == u64::MAX {
-                3
-            } else if next_wakeup == q.next_wakeup {
-                0
-            } else if next_wakeup == slice {
-                1
-            } else if next_wakeup == embassy {
-                2
-            } else {
-                3
-            };
-            crate::esp_radio::radio_timer_stats::record_arm(source);
-        }
-
         let sleep_duration = next_wakeup.saturating_sub(now);
 
         // assume 52-bit underlying timer. it's not a big deal to sleep for a shorter time
@@ -230,10 +207,6 @@ impl TimeDriver {
         }
 
         current_task.set_state(TaskState::Sleeping);
-
-        // PATCHED (bay-wheels-controller): which threads keep arming wakeups.
-        #[cfg(feature = "esp-radio")]
-        crate::esp_radio::radio_timer_stats::record_sleep(unsafe { current_task.as_ref().entry });
 
         let timestamp = at.duration_since_epoch().as_micros();
         debug!(

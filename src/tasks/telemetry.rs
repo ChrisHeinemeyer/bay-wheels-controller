@@ -164,7 +164,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
          \"spurious_ext0_total\":{},\"rc_scale_ppm\":{},\"heap_free\":{},\
          \"heap_prev_after_teardown\":{},\"heap_cycle_start\":{},\"heap_after_start\":{},\
          \"heap_after_connect\":{},\"heap_after_dhcp\":{},\"heap_after_fetch\":{},\
-         \"sleep_cfg\":{},\"min_nap_us\":{},\"handshake_ms\":{},\"ttfb_ms\":{},\
+         \"handshake_ms\":{},\"ttfb_ms\":{},\
          \"body_ms\":{},\"parse_ms\":{},\"body_bytes\":{},\"src\":\"{}\",\"lease\":\"{}\",\"lease_s\":{}",
         cycle.connect_ms,
         cycle.dhcp_ms,
@@ -182,8 +182,6 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         cycle.heap.after_connect,
         cycle.heap.after_dhcp,
         cycle.heap.after_fetch,
-        crate::power::sleep_level(),
-        crate::power::min_nap_us(),
         cycle.timings.handshake_ms,
         cycle.timings.ttfb_ms,
         cycle.timings.body_ms,
@@ -197,22 +195,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
         if cycle.lease_reused { "reused" } else { "dhcp" },
         smoltcp::socket::dhcpv4::LAST_LEASE_SECS.load(core::sync::atomic::Ordering::Relaxed),
     );
-    // What wakes the CPU while asleep (totals since boot; see `SleepTotals`).
-    let _ = write!(
-        out,
-        ",\"pmf_set\":{},\"sys_bracket_ms\":{},\"timg_bracket_ms\":{}",
-        super::wifi_connect::PMF_SET_RESULT.load(core::sync::atomic::Ordering::Relaxed),
-        sleep.sys_bracket_ms,
-        sleep.timg_bracket_ms
-    );
-    let _ = out.push_str(",\"int_raw\":");
-    push_json_array(out, &sleep.int_raw);
-    let _ = write!(
-        out,
-        ",\"timer_wakes_total\":{},\"armed_total\":",
-        sleep.timer_wakes
-    );
-    push_json_array(out, &sleep.armed);
+    // Which embassy tasks wake the CPU while asleep (totals since boot).
     #[cfg(feature = "sleep-trace")]
     {
         let _ = write!(
@@ -221,40 +204,6 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
             sleep.executor_wakes
         );
         push_json_array(out, &sleep.task_polls);
-        // Radio (WiFi blob) timer callbacks fired while asleep, by address.
-        let (slots, (other, passes, empty)) = esp_rtos::radio_timer_stats::snapshot();
-        let _ = out.push_str(",\"radio_timers\":{");
-        let mut first = true;
-        for (func, fires) in slots.iter().filter(|(f, _)| *f != 0) {
-            let sep = if first { "" } else { "," };
-            let _ = write!(out, "{sep}\"{func:#010x}\":{fires}");
-            first = false;
-        }
-        let _ = write!(
-            out,
-            "}},\"radio_timer_other\":{other},\"radio_timer_passes\":{passes},\
-             \"radio_timer_empty_passes\":{empty},\"thread_sleeps\":{{"
-        );
-        // Timed sleeps by esp-rtos thread entry function (0 = main/embassy).
-        let mut first = true;
-        for (entry, n) in esp_rtos::radio_timer_stats::sleeps()
-            .iter()
-            .filter(|(e, _)| *e != usize::MAX)
-        {
-            let sep = if first { "" } else { "," };
-            let _ = write!(out, "{sep}\"{entry:#010x}\":{n}");
-            first = false;
-        }
-        let _ = out.push('}');
-        // RTOS alarms armed for: [sleeping thread, time slice, embassy, other].
-        let _ = out.push_str(",\"rtos_arms\":");
-        push_json_array(out, &esp_rtos::radio_timer_stats::arms());
-        // Embassy alarms: [too early, processed, timers scheduled].
-        let _ = out.push_str(",\"embassy_alarms\":");
-        push_json_array(out, &esp_rtos::radio_timer_stats::embassy());
-        // Early embassy alarms by gap: <0.1, <1, <2.1, <5, <50 ms, longer.
-        let _ = out.push_str(",\"early_gaps\":");
-        push_json_array(out, &esp_rtos::radio_timer_stats::early_gaps());
     }
 
     let mut summary = heapless::String::<256>::new();
@@ -277,6 +226,7 @@ async fn build_body(out: &mut heapless::String<1536>, cycle: &CycleReport) -> bo
     has_reset_summary
 }
 
+#[cfg(feature = "sleep-trace")]
 fn push_json_array<const N: usize>(out: &mut heapless::String<N>, values: &[u32]) {
     let _ = out.push('[');
     for (i, v) in values.iter().enumerate() {

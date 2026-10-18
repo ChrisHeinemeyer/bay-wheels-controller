@@ -7,11 +7,10 @@
 # cycle boots the new firmware with nothing attached.
 #
 #   tools/ppk2/flash.sh                          # features: use-env,log-server
-#   SLEEP_CFG=2 FETCH_GAP_S=30 tools/ppk2/flash.sh
+#   FETCH_GAP_S=30 tools/ppk2/flash.sh
 #   FEATURES=use-env tools/ppk2/flash.sh
 #
-# SLEEP_CFG and FETCH_GAP_S are read at build time (see src/power.rs,
-# src/tasks/fetch.rs). The USB cable must be connected for flashing, but the
+# FETCH_GAP_S is read at build time (see src/tasks/fetch.rs). The USB cable must be connected for flashing, but the
 # board must be powered by the PPK2 only.
 set -euo pipefail
 
@@ -38,4 +37,4 @@ for _ in $(seq 40); do
 done
 probe-rs download --chip esp32s3 --preverify "$elf"
 ppk2 cycle
-echo "Flashed $version (SLEEP_CFG=${SLEEP_CFG:-0}, FETCH_GAP_S=${FETCH_GAP_S:-120})" >&2
+echo "Flashed $version (FETCH_GAP_S=${FETCH_GAP_S:-120})" >&2
