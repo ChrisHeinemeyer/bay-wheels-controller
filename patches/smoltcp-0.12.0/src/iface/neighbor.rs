@@ -50,10 +50,20 @@ pub struct Cache {
 
 impl Cache {
     /// Minimum delay between discovery requests, in milliseconds.
-    pub(crate) const SILENT_TIME: Duration = Duration::from_millis(1_000);
+    ///
+    /// PATCHED (bay-wheels-controller): 1 s upstream. The radio is powered
+    /// down between fetch cycles and the first frames after re-association
+    /// tend to get lost, so a lost ARP request cost a whole second of radio-on
+    /// time. Retry sooner.
+    pub(crate) const SILENT_TIME: Duration = Duration::from_millis(200);
 
     /// Neighbor entry lifetime, in milliseconds.
-    pub(crate) const ENTRY_LIFETIME: Duration = Duration::from_millis(60_000);
+    ///
+    /// PATCHED (bay-wheels-controller): 60 s upstream. Fetch cycles are ~2 min
+    /// apart, so every cycle started with an empty cache and had to ARP for
+    /// the gateway/LAN server first. Keeping entries for an hour lets the first
+    /// packet go straight out. Entries are refreshed by traffic as usual.
+    pub(crate) const ENTRY_LIFETIME: Duration = Duration::from_millis(3_600_000);
 
     /// Create a cache.
     pub fn new() -> Self {
