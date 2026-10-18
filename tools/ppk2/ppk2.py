@@ -104,10 +104,22 @@ def cycle(o, off_s):
     click.echo(f"DUT power-cycled ({off_s}s off), on at {o['mv']} mV")
 
 
-def collect(ppk, seconds, progress=None):
+def collect(ppk, seconds, progress=None, csv_writer=None):
     """Stream for `seconds` and return 1 ms bin means in mA. Every 10 s, appends
-    "<seconds> <last-10s mA>" to the `progress` file if given."""
+    "<seconds> <last-10s mA>" to the `progress` file and the new bins to
+    `csv_writer` (a `(writer, file)` pair) if given, so an interrupted run
+    still leaves its data on disk."""
     bins, acc, n = [], 0.0, 0
+    written = 0
+
+    def flush_csv():
+        nonlocal written
+        if csv_writer:
+            writer, f = csv_writer
+            writer.writerows((i, f"{b:.4f}") for i, b in enumerate(bins[written:], written))
+            f.flush()
+            written = len(bins)
+
     ppk.start_measuring()
     end = time.monotonic() + seconds
     next_report = time.monotonic() + 10
@@ -134,8 +146,10 @@ def collect(ppk, seconds, progress=None):
                 if progress:
                     progress.write(f"{len(bins) / 1000:.0f} {statistics.fmean(recent):.3f}\n")
                     progress.flush()
+                flush_csv()
     finally:
         ppk.stop_measuring()
+        flush_csv()
     return bins
 
 
@@ -172,7 +186,7 @@ def summarize(bins, sleep_max, radio_min):
 @click.option("--radio-min", default=80.0, show_default=True, help="mA; at/above = radio on")
 @click.option("--power-on/--no-power-on", default=True, show_default=True,
               help="Make sure the DUT is powered before measuring")
-@click.option("--csv", "csv_path", type=click.Path(dir_okay=False), help="Write 1 ms bins")
+@click.option("--csv", "csv_path", type=click.Path(dir_okay=False), help="Write 1 ms bins (appended every 10 s)")
 @click.option("--json", "json_path", type=click.Path(dir_okay=False), help="Write summary")
 @click.option("--label", default="", help="Stored in the JSON summary")
 @click.option("--progress", "progress_path", type=click.Path(dir_okay=False),
@@ -185,7 +199,15 @@ def measure(o, seconds, sleep_max, radio_min, power_on, csv_path, json_path, lab
     if power_on:
         ppk.toggle_DUT_power("ON")
     progress = open(progress_path, "a") if progress_path else None
-    bins = collect(ppk, seconds, progress)
+    csv_out = None
+    if csv_path:
+        f = open(csv_path, "w", newline="")
+        writer = csv.writer(f)
+        writer.writerow(["ms", "ma"])
+        csv_out = (writer, f)
+    bins = collect(ppk, seconds, progress, csv_out)
+    if csv_out:
+        csv_out[1].close()
     s = summarize(bins, sleep_max, radio_min)
     s.update(label=label, supply_mv=o["mv"], started_at=time.time() - s["seconds"])
 
@@ -195,11 +217,6 @@ def measure(o, seconds, sleep_max, radio_min, power_on, csv_path, json_path, lab
         avg = f"{c['avg_ma']:7.2f} mA" if c["avg_ma"] is not None else "      —   "
         click.echo(f"  {name:6} {c['share'] * 100:5.1f}%  avg {avg}  -> {c['contrib_ma']:6.2f} mA")
 
-    if csv_path:
-        with open(csv_path, "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["ms", "ma"])
-            w.writerows((i, f"{b:.4f}") for i, b in enumerate(bins))
     if json_path:
         with open(json_path, "w") as f:
             json.dump(s, f, indent=2)
