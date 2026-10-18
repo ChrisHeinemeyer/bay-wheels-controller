@@ -30,10 +30,9 @@ pub const DEEP_SLEEP_TEST: u32 = crate::power::parse_u32(option_env!("DEEP_SLEEP
 /// light-sleep `BOOT_GRACE`).
 const AWAKE_WINDOW_MS: u32 = 20_000;
 
-/// RTC GPIO number of the GPIO2 wake button, kept out of the pad hold.
-const WAKE_BUTTON_RTC_GPIO: u32 = 2;
-/// GPIO0-21 are the RTC pads, one `PAD_HOLD` bit each.
-const RTC_PAD_COUNT: u32 = 22;
+/// `PAD_HOLD` bits (one per RTC pad, GPIO0-21) of the board pins set up below.
+/// Not GPIO2 (the wake button) or GPIO19/20 (USB).
+const RTC_PAD_HOLD_MASK: u32 = 1 << 5 | 1 << 8 | 1 << 9 | 1 << 10 | 1 << 11 | 1 << 12 | 1 << 13;
 
 pub fn run(p: Peripherals) -> ! {
     // Holds survive a deep-sleep wake (but not a power cycle) and would freeze
@@ -116,20 +115,27 @@ fn isolated<'d>(pin: impl Pin + 'd) -> Flex<'d> {
     flex
 }
 
-/// Holds (or releases) every pad's current output level and pull through
-/// deep sleep, except the GPIO2 wake button. ESP-IDF's `gpio_force_hold_all`:
-/// one `PAD_HOLD` bit per RTC pad, and `DG_PAD_FORCE_HOLD` for the digital
-/// pads (GPIO33-38 here).
+/// Holds (or releases) the board pins' output levels and pulls through deep
+/// sleep: a `PAD_HOLD` bit per used RTC pad, and ESP-IDF's
+/// `gpio_deep_sleep_hold_en` (digital pad auto-hold) for GPIO33-38.
 fn set_pad_holds(hold: bool) {
     let rtc_cntl = LPWR::regs();
-    let rtc_pads = if hold {
-        ((1 << RTC_PAD_COUNT) - 1) & !(1 << WAKE_BUTTON_RTC_GPIO)
-    } else {
-        0
-    };
+    let rtc_pads = if hold { RTC_PAD_HOLD_MASK } else { 0 };
     rtc_cntl.pad_hold().write(|w| unsafe { w.bits(rtc_pads) });
-    rtc_cntl.dig_iso().modify(|_, w| {
-        w.dg_pad_force_hold().bit(hold);
-        w.dg_pad_force_unhold().bit(!hold)
-    });
+    if hold {
+        // Not `DG_PAD_FORCE_HOLD`: that freezes the SPI flash pads too while
+        // the CPU still runs from flash, and it hung on the next cache miss.
+        // Auto-hold latches the digital pads only once the chip is asleep.
+        rtc_cntl
+            .dig_iso()
+            .modify(|_, w| w.dg_pad_autohold_en().set_bit());
+    } else {
+        rtc_cntl.dig_iso().modify(|_, w| {
+            w.dg_pad_autohold_en().clear_bit();
+            w.dg_pad_force_hold().clear_bit()
+        });
+        rtc_cntl
+            .dig_iso()
+            .modify(|_, w| w.clr_dg_pad_autohold().set_bit());
+    }
 }

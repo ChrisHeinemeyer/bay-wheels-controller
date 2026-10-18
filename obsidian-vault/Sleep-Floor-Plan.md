@@ -106,6 +106,45 @@ Deep-sleep builds stay awake 20s after reset (attach/flash window), then sleep
 until a GPIO2 press, which boots into the same window again. Pad holds survive
 a deep-sleep wake but not a power cycle. A fresh `measure` power-cycles.
 
+#### Step 1 results (2026-10-18, PPK2 at 4.5V)
+
+Floor = `breakdown.py` sleep floor. "Cable" = the data-only USB cable (VBUS
+cut) left plugged in so probe-rs can flash while the PPK2 powers the board; it
+adds ~0.17mA (D+ pull-up into the host).
+
+| Run | Cable | Floor | Notes |
+|---|---|---|---|
+| `baseline` (v1.4.0) | out | **4.14mA** | matches the 4.16mA above |
+| `led-idle-1` (AL5887 chip-disabled from boot) | out | **2.64mA** | −1.50mA |
+| `led-idle-1` | in | 2.81mA | cable +0.17mA |
+| `led-idle-2` (+ LED_EN low) | in | 2.82mA | no gain over chip-disable |
+| `power-save` (`AL5887_POWER_SAVE=1`, chip left enabled) | in | 2.81mA | same as chip-disable |
+| `deep-al5887-standby` (board alone) | in | **1.53mA** | ESP32 in deep sleep |
+| `deep-al5887-shutdown` (board alone, LED_EN low) | in | 1.52mA | AL5887 standby is ~15µA |
+| `vddsdio-pd` (+ `LED_IDLE=1`) | in | 2.83mA | no gain (S3FN8 in-package flash) |
+| `rtc-peri-pd` (+ `LED_IDLE=1`) | in | n/a | **hangs** at the first nap (~47mA, JTAG unreachable), RTC watchdog reset after 60s |
+
+Why the AL5887 fix works: DEVICE_CONFIG1 resets to 0xAE, which has
+**Power_Save_EN (bit 4) off** (TI's LP50xx defaults it on). The firmware never
+wrote DEVICE_CONFIG1, so a chip-enabled AL5887 with all LEDs off stayed in
+normal mode (~1.5mA) instead of the datasheet's 15µA power-saving mode. Either
+fix works: chip-disable when idle (`LED_IDLE=1`) or set Power_Save_EN at init
+(`AL5887_POWER_SAVE=1`). LED touch/release/re-touch verified by hand on
+`led-idle-2`.
+
+New split (cable out, estimated): floor ~2.64mA = **board ~1.35-1.5mA**
+(regulator, battery divider, pull-ups, leakage; the deep-sleep reading includes
+some of the cable's 0.17mA) + **ESP32-S3 light sleep ~1.1-1.3mA** (datasheet
+~0.24mA). Step 2 (board) is now at least as big a lever as the chip.
+
+Not done: `rtc-peri-pd` hang root cause (likely the timer or GPIO wake path
+with the RTC peripheral domain off in esp-hal 1.0; not worth chasing before
+step 2 / an esp-hal upgrade).
+
+Flashing over the data-only cable: `ppk2.py on`/`cycle` did not bring up the
+probe; powering through a short `measure -s 30` did, every time (flash in its
+first 20s).
+
 Dropped from step 1: **CPU power-down**. esp-hal 1.0 (ours) and the latest
 release, 1.2.0, have no CPU retention. `main` gained it after 1.2.0 (#6288,
 2026-09-30, S3 backend using the retention DMA, ~8.8KB buffer via
